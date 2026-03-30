@@ -1,4 +1,4 @@
-# hybrid-catan-server
+# hybrid-catan-host
 
 ###  Description
 The **Hybrid Catan Server** is the authoritative backend that processes computer vision input, enforces game rules, and synchronizes real-time gameplay across all players.
