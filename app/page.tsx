@@ -1,51 +1,586 @@
 "use client";
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 
+/* ─────────────────────────────────────────────
+   DESIGN TOKENS  (mirrors HybridCatanLanding)
+   Primary:  #C8861A  Catan gold/amber
+   Accent:   #38BDF8  Circuit-board cyan
+   Dark:     #0E1117
+   Surface:  #161C27
+   Border:   #2A3347
+   Text:     #F0E6CC  warm parchment
+   Muted:    #6B7A99
+───────────────────────────────────────────── */
+
+// ── Hex SVG helper ────────────────────────────────────────────────────────────
+interface MiniHexProps {
+  x: number;
+  y: number;
+  size: number;
+  fill: string;
+  opacity?: number;
+  stroke?: string;
+}
+const MiniHex = ({ x, y, size, fill, opacity = 1, stroke = "transparent" }: MiniHexProps) => {
+  const pts = Array.from({ length: 6 }, (_, i) => {
+    const a = (Math.PI / 180) * (60 * i - 30);
+    return `${x + size * Math.cos(a)},${y + size * Math.sin(a)}`;
+  }).join(" ");
+  return <polygon points={pts} fill={fill} stroke={stroke} strokeWidth="1" opacity={opacity} />;
+};
+
+// ── Skewed CTA button (identical to landing) ─────────────────────────────────
+interface HexBtnProps {
+  children: React.ReactNode;
+  primary?: boolean;
+  onClick?: () => void;
+  className?: string;
+  disabled?: boolean;
+}
+const HexBtn = ({ children, primary = false, onClick, className = "", disabled = false }: HexBtnProps) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`relative inline-flex items-center justify-center gap-2 px-8 py-3
+      font-bold tracking-[0.15em] uppercase text-sm border-0 outline-none cursor-pointer
+      transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed
+      ${primary
+        ? "bg-gradient-to-br from-[#D4921E] to-[#A86B10] text-[#0E1117] hover:from-[#E8A52A] hover:to-[#C07E18] hover:scale-105 disabled:hover:scale-100"
+        : "bg-transparent border border-[#38BDF8]/40 text-[#38BDF8] hover:border-[#38BDF8] hover:bg-[#38BDF8]/10"
+      } ${className}`}
+    style={{ clipPath: "polygon(12px 0%,100% 0%,calc(100% - 12px) 100%,0% 100%)" }}
+  >
+    {children}
+  </button>
+);
+
+// ── Section label ─────────────────────────────────────────────────────────────
+const SectionLabel = ({ children }: { children: React.ReactNode }) => (
+  <div className="flex items-center justify-center gap-3 mb-4">
+    <div className="h-px w-10 bg-gradient-to-r from-transparent to-[#C8861A]" />
+    <span className="text-[#C8861A] text-[11px] tracking-[0.45em] uppercase font-bold" style={{ fontFamily: "'Cinzel', serif" }}>
+      {children}
+    </span>
+    <div className="h-px w-10 bg-gradient-to-l from-transparent to-[#C8861A]" />
+  </div>
+);
+
+// ── Status pill ───────────────────────────────────────────────────────────────
+type StatusType = "idle" | "connecting" | "live" | "error";
+const STATUS_MAP: Record<StatusType, { dot: string; text: string; label: string }> = {
+  idle: { dot: "bg-[#2A3347]", text: "text-[#4A5875]", label: "Awaiting Connection" },
+  connecting: { dot: "bg-yellow-400", text: "text-yellow-400", label: "Connecting…" },
+  live: { dot: "bg-emerald-500", text: "text-emerald-400", label: "Camera Live" },
+  error: { dot: "bg-red-500", text: "text-red-400", label: "Connection Failed" },
+};
+
+const StatusPill = ({ status }: { status: StatusType }) => {
+  const s = STATUS_MAP[status];
+  return (
+    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded border border-[#2A3347] bg-[#0A0F18]">
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${status === "live" || status === "connecting" ? "animate-pulse" : ""}`} />
+      <span className={`f-cinzel text-[10px] tracking-[0.35em] uppercase ${s.text}`}>{s.label}</span>
+    </div>
+  );
+};
+
+// ── Info row ──────────────────────────────────────────────────────────────────
+const InfoRow = ({ icon, label, value, accent = "amber" }: { icon: string; label: string; value: string; accent?: "amber" | "cyan" }) => (
+  <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-sm
+    ${accent === "amber" ? "border-[#C8861A]/20 bg-[#C8861A]/05" : "border-[#38BDF8]/20 bg-[#38BDF8]/05"}`}>
+    <span className="text-base">{icon}</span>
+    <span className="f-cinzel text-[10px] tracking-widest uppercase text-[#4A5875] flex-1">{label}</span>
+    <span className={`f-cinzel text-xs font-black ${accent === "amber" ? "text-[#F0C060]" : "text-[#7DD3FC]"}`}>{value}</span>
+  </div>
+);
+
+// ── Log entry ─────────────────────────────────────────────────────────────────
+interface LogEntry {
+  ts: string;
+  msg: string;
+  type: "info" | "success" | "warn" | "error";
+}
+const LOG_COLORS: Record<LogEntry["type"], string> = {
+  info: "text-[#6B7A99]",
+  success: "text-emerald-400",
+  warn: "text-yellow-400",
+  error: "text-red-400",
+};
+
+// ── MAIN ──────────────────────────────────────────────────────────────────────
 export default function Host() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const [status, setStatus] = useState<StatusType>("idle");
+  const [logs, setLogs] = useState<LogEntry[]>([{ ts: now(), msg: "System ready — press Connect to start.", type: "info" }]);
+  const [players, setPlayers] = useState(0);
+  const [gameId, setGameId] = useState<string | null>(null);
+
+  function now() {
+    return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+  function addLog(msg: string, type: LogEntry["type"] = "info") {
+    setLogs(l => [{ ts: now(), msg, type }, ...l].slice(0, 40));
+  }
 
   async function connect() {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-    pcRef.current = pc;
+    if (status === "live" || status === "connecting") return;
+    setStatus("connecting");
+    addLog("Initialising WebRTC peer connection…", "info");
 
-    const socket = new WebSocket(`${process.env.NEXT_PUBLIC_HOST_WS}`);
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+      pcRef.current = pc;
 
-    socket.onopen = async () => {
-      // Get camera once, here only
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      const wsUrl = process.env.NEXT_PUBLIC_HOST_WS ?? "ws://localhost:3001";
+      const socket = new WebSocket(wsUrl);
+      addLog(`Connecting to signaling server: ${wsUrl}`, "info");
 
-      const localVideo = document.getElementById("localVideo") as HTMLVideoElement;
-      if (localVideo) localVideo.srcObject = stream;
+      socket.onopen = async () => {
+        addLog("Signaling socket opened.", "success");
+        addLog("Requesting camera access…", "info");
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socket.send(JSON.stringify({ type: "offer", offer }));
-    };
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+          stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-    socket.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "answer") {
-        await pc.setRemoteDescription(data.answer);
-      } else if (data.type === "ice") {
-        await pc.addIceCandidate(data.candidate);
-      }
-    };
+          const vid = document.getElementById("localVideo") as HTMLVideoElement;
+          if (vid) vid.srcObject = stream;
 
-    // Single onicecandidate — relay candidates to player via signaling
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
-      }
-    };
+          addLog("Camera stream acquired — creating offer…", "success");
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.send(JSON.stringify({ type: "offer", offer }));
+          addLog("SDP offer sent to signaling server.", "info");
+
+          // Generate a mock game ID
+          const id = `CATAN-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+          setGameId(id);
+          addLog(`Game session created: ${id}`, "success");
+          setStatus("live");
+        } catch (err) {
+          addLog(`Camera error: ${(err as Error).message}`, "error");
+          setStatus("error");
+        }
+      };
+
+      socket.onmessage = async event => {
+        const data = JSON.parse(event.data);
+        if (data.type === "answer") {
+          await pc.setRemoteDescription(data.answer);
+          addLog("Remote SDP answer received & applied.", "success");
+        } else if (data.type === "ice") {
+          await pc.addIceCandidate(data.candidate);
+          addLog("ICE candidate added.", "info");
+        } else if (data.type === "player_joined") {
+          setPlayers(p => p + 1);
+          addLog(`Player joined the session.`, "success");
+        }
+      };
+
+      socket.onerror = () => {
+        addLog("WebSocket error — check NEXT_PUBLIC_HOST_WS.", "error");
+        setStatus("error");
+      };
+
+      pc.onicecandidate = event => {
+        if (event.candidate && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
+          addLog("ICE candidate relayed.", "info");
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        addLog(`ICE state → ${pc.iceConnectionState}`, pc.iceConnectionState === "connected" ? "success" : "info");
+      };
+
+    } catch (err) {
+      addLog(`Fatal: ${(err as Error).message}`, "error");
+      setStatus("error");
+    }
+  }
+
+  function disconnect() {
+    pcRef.current?.close();
+    pcRef.current = null;
+    const vid = document.getElementById("localVideo") as HTMLVideoElement;
+    if (vid) vid.srcObject = null;
+    setStatus("idle");
+    setPlayers(0);
+    setGameId(null);
+    addLog("Session disconnected.", "warn");
   }
 
   return (
-    <div>
-      <video id="localVideo" autoPlay playsInline muted />
-      <button onClick={connect}>Connect</button>
+    <div className="min-h-screen text-[#F0E6CC] overflow-x-hidden bg-[#0E1117]">
+
+      {/* ── FONTS + KEYFRAMES ── */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Cinzel:wght@400;600;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,400&display=swap');
+        .f-title  { font-family:'Cinzel Decorative',serif; }
+        .f-cinzel { font-family:'Cinzel',serif; }
+        .f-body   { font-family:'Crimson Pro',serif; }
+        @keyframes floatY    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+        @keyframes glowPulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+        @keyframes scanLine  { 0%{top:0%} 100%{top:100%} }
+        @keyframes fadeIn    { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+        .float       { animation:floatY 6s ease-in-out infinite; }
+        .glow-pulse  { animation:glowPulse 2.5s ease-in-out infinite; }
+        .amber-glow  { text-shadow:0 0 40px rgba(200,134,26,.8),0 0 80px rgba(200,134,26,.3); }
+        .card-glow   { box-shadow:0 0 0 1px rgba(200,134,26,.06),0 20px 60px rgba(0,0,0,.6); }
+        .scan-line   { position:absolute; left:0; right:0; height:2px;
+                       background:linear-gradient(to right,transparent,rgba(56,189,248,.4),transparent);
+                       animation:scanLine 3s linear infinite; pointer-events:none; }
+        .log-entry   { animation:fadeIn .25s ease both; }
+      `}</style>
+
+      {/* ════════════ NAV ════════════ */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0A0D14]/95 backdrop-blur-xl border-b border-[#C8861A]/20 py-3">
+        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
+          <a href="/" className="flex items-center gap-3 group">
+            <svg viewBox="0 0 40 40" className="w-9 h-9">
+              <MiniHex x={20} y={20} size={18} fill="#C8861A" stroke="#F0C060" opacity={1} />
+              <text x="20" y="24.5" textAnchor="middle" fill="#0E1117" fontSize="10" fontWeight="900" fontFamily="Cinzel Decorative,serif">H</text>
+            </svg>
+            <div>
+              <div className="f-title text-[#C8861A] text-sm tracking-wider leading-none group-hover:amber-glow transition-all">HYBRID</div>
+              <div className="f-cinzel text-[#F0E6CC]/50 text-[9px] tracking-[0.45em] uppercase leading-none">CATAN</div>
+            </div>
+          </a>
+
+          <div className="hidden md:flex items-center gap-8">
+            {[["How It Works", "#how"], ["Features", "#features"], ["Tech Stack", "#tech"], ["Demo", "#play"]].map(([l, h]) => (
+              <a key={l} href={h} className="f-cinzel text-[11px] tracking-[0.25em] uppercase text-[#6B7A99] hover:text-[#C8861A] transition-colors duration-300">{l}</a>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <StatusPill status={status} />
+          </div>
+        </div>
+      </nav>
+
+      {/* ════════════ PAGE HERO ════════════ */}
+      <div className="relative pt-28 pb-12 px-4 overflow-hidden">
+        {/* Hex bg pattern */}
+        <div className="absolute inset-0 pointer-events-none" style={{ opacity: 0.035 }}>
+          <svg viewBox="0 0 1200 400" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+            {Array.from({ length: 4 }, (_, r) =>
+              Array.from({ length: 12 }, (_, c) => {
+                const x = c * 110 + (r % 2 === 0 ? 0 : 55);
+                const y = r * 95 + 50;
+                return <MiniHex key={`${r}-${c}`} x={x} y={y} size={46} fill="#C8861A" stroke="#F0C060" opacity={1} />;
+              })
+            ).flat()}
+          </svg>
+        </div>
+
+        {/* Bottom circuit line */}
+        <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
+          <svg viewBox="0 0 1440 60" className="w-full opacity-20" preserveAspectRatio="none">
+            <path d="M0,30 L200,30 L220,10 L440,10 L460,30 L720,30 L740,10 L920,10 L940,30 L1200,30 L1220,10 L1440,10"
+              fill="none" stroke="#38BDF8" strokeWidth="1" />
+            <circle cx="220" cy="10" r="2.5" fill="#38BDF8" />
+            <circle cx="740" cy="10" r="2.5" fill="#C8861A" />
+            <circle cx="940" cy="30" r="2.5" fill="#38BDF8" />
+          </svg>
+        </div>
+
+        <div className="relative max-w-6xl mx-auto text-center">
+          <SectionLabel>Game Host Console</SectionLabel>
+          <h1 className="f-title text-[clamp(2.5rem,6vw,5rem)] text-[#F0E6CC] leading-none">
+            Camera
+            <span className="text-[#C8861A] amber-glow"> Command</span>
+          </h1>
+          <p className="f-body text-[#6B7A99] text-lg mt-4 max-w-xl mx-auto">
+            Connect your overhead camera, open a session, and let the CV engine take over.
+            Players join by link — you just watch the board.
+          </p>
+        </div>
+      </div>
+
+      {/* ════════════ MAIN GRID ════════════ */}
+      <main className="max-w-6xl mx-auto px-4 pb-24 grid lg:grid-cols-[1fr_380px] gap-6">
+
+        {/* ── LEFT: Camera feed + controls ── */}
+        <div className="space-y-4">
+
+          {/* Camera viewport */}
+          <div className="relative rounded-xl border border-[#2A3347] overflow-hidden bg-[#060A10] card-glow"
+            style={{ aspectRatio: "16/9" }}>
+
+            {/* Scan line overlay (shows when live) */}
+            {status === "live" && <div className="scan-line" />}
+
+            {/* Corner brackets */}
+            {(["top-3 left-3", "top-3 right-3", "bottom-3 left-3", "bottom-3 right-3"] as const).map((pos, i) => (
+              <div key={i} className={`absolute ${pos} w-5 h-5 pointer-events-none`}
+                style={{
+                  borderTop: i < 2 ? "2px solid rgba(200,134,26,.6)" : undefined,
+                  borderBottom: i >= 2 ? "2px solid rgba(200,134,26,.6)" : undefined,
+                  borderLeft: i % 2 === 0 ? "2px solid rgba(200,134,26,.6)" : undefined,
+                  borderRight: i % 2 === 1 ? "2px solid rgba(200,134,26,.6)" : undefined,
+                }} />
+            ))}
+
+            {/* Idle overlay */}
+            {status !== "live" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10">
+                {/* Hex grid pattern */}
+                <div className="absolute inset-0 opacity-[0.06]">
+                  <svg viewBox="0 0 640 360" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+                    {Array.from({ length: 4 }, (_, r) =>
+                      Array.from({ length: 7 }, (_, c) => {
+                        const x = c * 96 + (r % 2 === 0 ? 0 : 48);
+                        const y = r * 84 + 42;
+                        return <MiniHex key={`${r}-${c}`} x={x} y={y} size={40} fill="#C8861A" stroke="#F0C060" opacity={1} />;
+                      })
+                    ).flat()}
+                  </svg>
+                </div>
+                <div className={`float ${status === "connecting" ? "opacity-60" : ""}`}>
+                  <svg viewBox="0 0 80 80" className="w-20 h-20">
+                    <MiniHex x={40} y={40} size={36} fill="rgba(200,134,26,.12)" stroke="rgba(200,134,26,.5)" opacity={1} />
+                    <text x="40" y="47" textAnchor="middle" fill="#C8861A" fontSize="22">📷</text>
+                  </svg>
+                </div>
+                <div>
+                  <p className="f-cinzel text-sm text-[#4A5875] tracking-[0.3em] uppercase text-center">
+                    {status === "connecting" ? "Requesting camera…" : status === "error" ? "Connection failed" : "Camera not connected"}
+                  </p>
+                  <p className="f-body text-xs text-[#2A3347] text-center mt-1">
+                    {status === "error" ? "Check console and NEXT_PUBLIC_HOST_WS" : "Press Connect below to start the session"}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Actual video element */}
+            <video
+              id="localVideo"
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-cover transition-opacity duration-500 ${status === "live" ? "opacity-100" : "opacity-0"}`}
+            />
+
+            {/* Live badge overlay */}
+            {status === "live" && (
+              <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded
+                border border-red-500/40 bg-[#0E1117]/80 backdrop-blur-sm z-20">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="f-cinzel text-[10px] tracking-[0.35em] uppercase text-red-400">LIVE</span>
+              </div>
+            )}
+
+            {/* CV badge overlay */}
+            {status === "live" && (
+              <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded
+                border border-[#38BDF8]/30 bg-[#0E1117]/80 backdrop-blur-sm z-20">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#38BDF8] glow-pulse" />
+                <span className="f-cinzel text-[10px] tracking-[0.35em] uppercase text-[#38BDF8]">CV Active</span>
+              </div>
+            )}
+
+            {/* Bottom meta bar */}
+            <div className="absolute bottom-0 left-0 right-0 px-4 py-3 z-20
+              bg-gradient-to-t from-[#0E1117]/90 to-transparent flex items-center justify-between">
+              <span className="f-cinzel text-[9px] tracking-[0.4em] uppercase text-[#2A3347]">
+                {status === "live" ? "30 FPS · 1280×720" : "No signal"}
+              </span>
+              {gameId && (
+                <span className="f-cinzel text-[9px] tracking-[0.3em] uppercase text-[#C8861A]/70">
+                  {gameId}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Controls row */}
+          <div className="flex flex-wrap items-center gap-3">
+            {status !== "live" ? (
+              <HexBtn primary onClick={connect} disabled={status === "connecting"}>
+                {status === "connecting" ? "⏳ Connecting…" : "📷 Connect Camera"}
+              </HexBtn>
+            ) : (
+              <HexBtn onClick={disconnect}>⏹ Disconnect</HexBtn>
+            )}
+            {status === "live" && (
+              <>
+                <HexBtn primary>⚔️ Start Game</HexBtn>
+                <HexBtn>🔗 Copy Join Link</HexBtn>
+              </>
+            )}
+          </div>
+
+          {/* Session info grid */}
+          {status === "live" && (
+            <div className="grid sm:grid-cols-2 gap-2 mt-2">
+              <InfoRow icon="🎮" label="Session ID" value={gameId ?? "—"} accent="amber" />
+              <InfoRow icon="👥" label="Players Joined" value={`${players} / 4`} accent="cyan" />
+              <InfoRow icon="📷" label="Frame Rate" value="30 FPS" accent="amber" />
+              <InfoRow icon="⚡" label="Sync Latency" value="< 50ms" accent="cyan" />
+            </div>
+          )}
+
+          {/* Instruction steps */}
+          <div className="rounded-xl border border-[#2A3347] bg-[#0E1117] overflow-hidden card-glow">
+            <div className="px-5 py-3 border-b border-[#2A3347]">
+              <span className="f-cinzel text-xs text-[#C8861A] tracking-[0.25em] uppercase">Setup Guide</span>
+            </div>
+            <div className="p-5 space-y-4">
+              {[
+                { num: "01", icon: "📷", title: "Mount your camera overhead", desc: "Position it so the entire board is visible. A height of 60–80 cm works well." },
+                { num: "02", icon: "🔗", title: "Press Connect Camera", desc: "Grants camera access and opens the signaling socket to the game server." },
+                { num: "03", icon: "📱", title: "Share the join link", desc: "Players open it on any phone browser — no app required." },
+                { num: "04", icon: "⚔️", title: "Press Start Game", desc: "The CV engine begins tracking pieces and the rule engine goes live." },
+              ].map(({ num, icon, title, desc }) => (
+                <div key={num} className="flex gap-4 items-start group">
+                  <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center
+                    border border-[#C8861A]/40 bg-[#C8861A]/08 text-[#C8861A] font-black text-xs
+                    group-hover:border-[#C8861A] group-hover:bg-[#C8861A]/15 transition-all duration-300"
+                    style={{ clipPath: "polygon(6px 0%,100% 0%,calc(100% - 6px) 100%,0% 100%)", fontFamily: "'Cinzel', serif" }}>
+                    {num}
+                  </div>
+                  <div className="pt-0.5">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span>{icon}</span>
+                      <h4 className="text-[#F0E6CC] font-bold text-sm tracking-wide f-cinzel">{title}</h4>
+                    </div>
+                    <p className="text-[#6B7A99] text-sm leading-relaxed f-body">{desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── RIGHT: Log panel + session stats ── */}
+        <div className="space-y-4">
+
+          {/* Session stats card */}
+          <div className="rounded-xl border border-[#C8861A]/20 bg-gradient-to-br from-[#C8861A]/05 to-[#0E1117] overflow-hidden card-glow">
+            <div className="px-5 py-3 border-b border-[#C8861A]/15 flex items-center justify-between">
+              <span className="f-cinzel text-xs text-[#C8861A] tracking-[0.25em] uppercase">Session Status</span>
+              <StatusPill status={status} />
+            </div>
+            <div className="p-5 space-y-3">
+              {/* Visual pipeline */}
+              {[
+                { icon: "📷", label: "Camera", active: status === "live" },
+                { icon: "👁️", label: "CV Engine", active: status === "live" },
+                { icon: "⚙️", label: "Game Server", active: status === "live" },
+                { icon: "📡", label: "WebSocket", active: status === "live" },
+                { icon: "📱", label: "Players", active: players > 0 },
+              ].map(({ icon, label, active }, i) => (
+                <div key={label}>
+                  <div className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-all duration-500
+                    ${active
+                      ? "border-[#C8861A]/40 bg-[#C8861A]/08"
+                      : "border-[#2A3347] bg-[#0A0F18]"}`}>
+                    <span className="text-lg w-6 text-center">{icon}</span>
+                    <span className={`f-cinzel text-xs tracking-wider flex-1 ${active ? "text-[#F0C060]" : "text-[#2A3347]"}`}>{label}</span>
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 transition-all duration-500
+                      ${active ? "bg-emerald-500 animate-pulse" : "bg-[#1A2235]"}`} />
+                  </div>
+                  {i < 4 && (
+                    <div className="flex pl-[2.1rem] py-0.5">
+                      <div className={`w-px h-4 transition-all duration-500 ${active ? "bg-gradient-to-b from-[#C8861A]/50 to-[#38BDF8]/25" : "bg-[#1A2235]"}`} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Players waiting */}
+          <div className="rounded-xl border border-[#38BDF8]/15 bg-[#0E1117] overflow-hidden card-glow">
+            <div className="px-5 py-3 border-b border-[#38BDF8]/12 flex items-center justify-between">
+              <span className="f-cinzel text-xs text-[#38BDF8] tracking-[0.25em] uppercase">Players</span>
+              <span className="f-cinzel text-xs text-[#4A5875]">{players} / 4 joined</span>
+            </div>
+            <div className="p-4 space-y-2">
+              {[
+                { color: "bg-red-500", label: "Red", host: true },
+                { color: "bg-blue-500", label: "Blue", host: false },
+                { color: "bg-emerald-600", label: "Green", host: false },
+                { color: "bg-orange-500", label: "Orange", host: false },
+              ].map(({ color, label, host }, i) => {
+                const joined = i === 0 ? status === "live" : i < players + (status === "live" ? 1 : 0);
+                return (
+                  <div key={label} className={`flex items-center gap-3 px-3 py-2 rounded border transition-all duration-300
+                    ${joined ? "border-[#2A3347] bg-[#161C27]" : "border-[#161C27] bg-[#0A0F18] opacity-40"}`}>
+                    <div className={`w-7 h-7 rounded-full ${color} flex items-center justify-center text-[10px] font-black text-white flex-shrink-0`}>
+                      {label[0]}
+                    </div>
+                    <span className="f-cinzel text-xs tracking-wider text-[#6B7A99] flex-1">{label}</span>
+                    {host && joined && <span className="f-cinzel text-[9px] text-[#C8861A] tracking-widest uppercase px-2 py-0.5 border border-[#C8861A]/30 rounded">Host</span>}
+                    {joined && !host && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                    {!joined && <span className="f-cinzel text-[9px] text-[#2A3347] tracking-widest uppercase">Waiting</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Connection log */}
+          <div className="rounded-xl border border-[#2A3347] bg-[#0E1117] overflow-hidden card-glow">
+            <div className="px-5 py-3 border-b border-[#2A3347] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 glow-pulse" />
+                <span className="f-cinzel text-xs text-[#38BDF8] tracking-[0.25em] uppercase">Connection Log</span>
+              </div>
+              <button onClick={() => setLogs([{ ts: now(), msg: "Log cleared.", type: "info" }])}
+                className="f-cinzel text-[9px] text-[#2A3347] hover:text-[#4A5875] tracking-widest uppercase transition-colors">
+                Clear
+              </button>
+            </div>
+            <div className="p-3 h-64 overflow-y-auto space-y-1 scrollbar-thin" style={{ scrollbarColor: "#2A3347 transparent" }}>
+              {logs.map((entry, i) => (
+                <div key={i} className={`log-entry flex gap-2 text-xs font-mono py-1 px-2 rounded
+                  ${i === 0 ? "bg-[#161C27]" : ""}`}>
+                  <span className="text-[#2A3347] flex-shrink-0">{entry.ts}</span>
+                  <span className={LOG_COLORS[entry.type]}>{entry.msg}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Env hint */}
+          <div className="px-4 py-3 rounded-lg border border-[#C8861A]/15 bg-[#C8861A]/04 flex gap-3">
+            <span className="text-[#C8861A] text-sm flex-shrink-0">⚙️</span>
+            <div>
+              <p className="f-cinzel text-[10px] text-[#C8861A] tracking-widest uppercase mb-1">Environment</p>
+              <p className="f-body text-xs text-[#4A5875] leading-relaxed">
+                Set <code className="text-[#F0C060] bg-[#0A0F18] px-1 rounded">NEXT_PUBLIC_HOST_WS</code> in{" "}
+                <code className="text-[#7DD3FC] bg-[#0A0F18] px-1 rounded">.env.local</code> to your signaling server URL.
+              </p>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* ════════════ FOOTER ════════════ */}
+      <footer className="border-t border-[#C8861A]/10 py-8 px-6 bg-[#060810]">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <svg viewBox="0 0 40 40" className="w-8 h-8">
+              <MiniHex x={20} y={20} size={18} fill="#C8861A" stroke="#F0C060" opacity={1} />
+              <text x="20" y="24.5" textAnchor="middle" fill="#0E1117" fontSize="10" fontWeight="900" fontFamily="Cinzel Decorative,serif">H</text>
+            </svg>
+            <div className="f-title text-[#C8861A] text-sm tracking-wider">HYBRID CATAN</div>
+          </div>
+          <p className="f-cinzel text-[10px] text-[#2A3347] tracking-[0.2em] uppercase">
+            Host Console · WebRTC · Socket.IO · OpenCV
+          </p>
+          <div className="flex gap-5">
+            {["Docs", "GitHub", "Discord"].map(l => (
+              <a key={l} href="#" className="f-cinzel text-[10px] tracking-[0.25em] uppercase text-[#2A3347] hover:text-[#C8861A] transition-colors duration-300">{l}</a>
+            ))}
+          </div>
+        </div>
+      </footer>
+
     </div>
   );
 }
