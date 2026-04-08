@@ -6,7 +6,6 @@
  * and return a result, but do NOT modify any game state themselves.
  */
 
-import { UUID } from "crypto";
 import { GameState, Player } from "../../../utils/type";
 
 
@@ -181,6 +180,102 @@ export function bankHasDevCards(gameState: GameState): RuleResult {
 
 
 // ============================================================
+// Build Validation
+// ============================================================
+// Convenience functions that run both the resource cost check and the
+// piece limit check in one call. Turn management calls these directly.
+// They return early with the failure reason if either check fails.
+
+/**
+ * Checks whether a player can build a settlement.
+ * Validates both resource cost (1 wood, 1 brick, 1 wool, 1 wheat)
+ * and remaining piece count (max 5 settlements).
+ *
+ * @param player - The player attempting to build
+ * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
+ */
+export function canBuildSettlement(player: Player): RuleResult {
+    const affordable = canAfford(player, "SETTLEMENT");
+    if (!affordable.valid) return affordable;        // fails here if not enough resources
+    return hasPiecesRemaining(player, "SETTLEMENT"); // fails here if no pieces left
+}
+
+/**
+ * Checks whether a player can upgrade a settlement to a city.
+ * Validates resource cost (2 wheat, 3 ore), piece limit (max 4 cities),
+ * and that a settlement exists to upgrade.
+ * The specific vertex check requires board state from the CV engine.
+ *
+ * @param player - The player attempting to upgrade
+ * @returns RuleResult — valid if all checks pass, invalid with reason if any fail
+ */
+export function canUpgradeToCity(player: Player): RuleResult {
+    const affordable = canAfford(player, "CITY");
+    if (!affordable.valid) return affordable;
+
+    const piecesLeft = hasPiecesRemaining(player, "CITY");
+    if (!piecesLeft.valid) return piecesLeft;
+
+    // citiesPlaced can never exceed settlementsPlaced since cities replace settlements
+    // If they're equal, all settlements have already been upgraded — nothing left to upgrade
+    if (player.pieces.settlementsPlaced <= player.pieces.citiesPlaced) {
+        return { valid: false, reason: "No settlements available to upgrade to a city" };
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Checks whether a player can build a road.
+ * Validates both resource cost (1 wood, 1 brick)
+ * and remaining piece count (max 15 roads).
+ *
+ * @param player - The player attempting to build
+ * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
+ */
+export function canBuildRoad(player: Player): RuleResult {
+    const affordable = canAfford(player, "ROAD");
+    if (!affordable.valid) return affordable;
+    return hasPiecesRemaining(player, "ROAD");
+}
+
+/**
+ * Checks whether a player can buy a development card.
+ * Validates both resource cost (1 wool, 1 wheat, 1 ore)
+ * and whether the bank still has development cards remaining.
+ *
+ * @param player - The player attempting to buy
+ * @param gameState - The current game state (needed to check bank stock)
+ * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
+ */
+export function canBuyDevCard(player: Player, gameState: GameState): RuleResult {
+    const affordable = canAfford(player, "DEV_CARD");
+    if (!affordable.valid) return affordable;
+    return bankHasDevCards(gameState);
+}
+
+
+// ============================================================
+// Robber
+// ============================================================
+
+/**
+ * Checks whether a player can steal a resource from a target player.
+ * A player cannot steal from someone who has no resources.
+ *
+ * @param target - The player being stolen from
+ * @returns RuleResult — valid if the target has resources, invalid if their hand is empty
+ */
+export function canStealFrom(target: Player): RuleResult {
+    const totalResources = Object.values(target.resources).reduce((sum, amount) => sum + amount, 0);
+    if (totalResources === 0) {
+        return { valid: false, reason: `${target.name} has no resources to steal` };
+    }
+    return { valid: true };
+}
+
+
+// ============================================================
 // Victory Condition
 // ============================================================
 
@@ -243,67 +338,67 @@ export function checkVictoryCondition(player: Player): RuleResult {
     return { valid: false, reason: `${player.name} has ${vp}/10 victory points` };
 }
 
-
-// ============================================================
-// Combined Build Validation (cost + pieces)
-// ============================================================
-// Convenience functions that run both the resource cost check and the
-// piece limit check in one call. Turn management calls these directly.
-// They return early with the failure reason if either check fails.
-
 /**
- * Checks whether a player can build a settlement.
- * Validates both resource cost (1 wood, 1 brick, 1 wool, 1 wheat)
- * and remaining piece count (max 5 settlements).
+ * Checks whether a player can claim the Largest Army bonus.
+ * Requires at least 3 knights played, and more than the current holder.
  *
- * @param player - The player attempting to build
- * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
+ * @param player - The player attempting to claim Largest Army
+ * @param gameState - The current game state (used to find the current holder's army size)
+ * @returns RuleResult — valid if the player qualifies, invalid with reason if not
  */
-export function canBuildSettlement(player: Player): RuleResult {
-    const affordable = canAfford(player, "SETTLEMENT");
-    if (!affordable.valid) return affordable;        // fails here if not enough resources
-    return hasPiecesRemaining(player, "SETTLEMENT"); // fails here if no pieces left
+export function canClaimLargestArmy(player: Player, gameState: GameState): RuleResult {
+    // Must have played at least 3 knight cards
+    if (player.achievements.armySize < 3) {
+        return {
+            valid: false,
+            reason: `Army size too small: need at least 3 knights, have ${player.achievements.armySize}`,
+        };
+    }
+
+    // Find the current Largest Army holder (if any)
+    const currentHolder = gameState.players.find(p => p.achievements.hasLargestArmy);
+
+    // If someone already holds it, this player must have strictly more knights
+    if (currentHolder && player.achievements.armySize <= currentHolder.achievements.armySize) {
+        return {
+            valid: false,
+            reason: `Must have more knights than current holder (${currentHolder.name} has ${currentHolder.achievements.armySize})`,
+        };
+    }
+
+    return { valid: true };
 }
 
 /**
- * Checks whether a player can upgrade a settlement to a city.
- * Validates both resource cost (2 wheat, 3 ore)
- * and remaining piece count (max 4 cities).
+ * Checks whether a player can claim the Longest Road bonus.
+ * Requires at least 5 connected roads, and a longer road than the current holder.
+ * Note: actual road length calculation requires board state from the CV engine.
  *
- * @param player - The player attempting to upgrade
- * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
+ * @param claimedLength - The road length being claimed (calculated by CV/board logic)
+ * @param gameState - The current game state (used to find the current holder's road length)
+ * @returns RuleResult — valid if the player qualifies, invalid with reason if not
  */
-export function canBuildCity(player: Player): RuleResult {
-    const affordable = canAfford(player, "CITY");
-    if (!affordable.valid) return affordable;
-    return hasPiecesRemaining(player, "CITY");
+export function canClaimLongestRoad(claimedLength: number, gameState: GameState): RuleResult {
+    // Must have at least 5 connected roads
+    if (claimedLength < 5) {
+        return {
+            valid: false,
+            reason: `Road too short: need at least 5 connected roads, have ${claimedLength}`,
+        };
+    }
+
+    // Find the current Longest Road holder (if any)
+    const currentHolder = gameState.players.find(p => p.achievements.hasLongestRoad);
+
+    // If someone already holds it, this player must have strictly more roads
+    if (currentHolder && claimedLength <= currentHolder.achievements.longestRoadLength) {
+        return {
+            valid: false,
+            reason: `Road not long enough: must beat current holder (${currentHolder.name} has ${currentHolder.achievements.longestRoadLength})`,
+        };
+    }
+
+    return { valid: true };
 }
 
-/**
- * Checks whether a player can build a road.
- * Validates both resource cost (1 wood, 1 brick)
- * and remaining piece count (max 15 roads).
- *
- * @param player - The player attempting to build
- * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
- */
-export function canBuildRoad(player: Player): RuleResult {
-    const affordable = canAfford(player, "ROAD");
-    if (!affordable.valid) return affordable;
-    return hasPiecesRemaining(player, "ROAD");
-}
 
-/**
- * Checks whether a player can buy a development card.
- * Validates both resource cost (1 wool, 1 wheat, 1 ore)
- * and whether the bank still has development cards remaining.
- *
- * @param player - The player attempting to buy
- * @param gameState - The current game state (needed to check bank stock)
- * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
- */
-export function canBuyDevCard(player: Player, gameState: GameState): RuleResult {
-    const affordable = canAfford(player, "DEV_CARD");
-    if (!affordable.valid) return affordable;
-    return bankHasDevCards(gameState);
-}
