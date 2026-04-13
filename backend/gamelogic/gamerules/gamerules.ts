@@ -1,336 +1,404 @@
-import { UUID } from "crypto";
-import { GameState, Player, Trade, resources } from "./types";
+/**
+ * gamerules.ts
+ *
+ * Contains all rule validation logic for Hybrid Catan.
+ * These functions are pure validators — they check whether an action is legal
+ * and return a result, but do NOT modify any game state themselves.
+ */
 
-// ─────────────────────────────────────────────
-// Types local to trade logic
-// ─────────────────────────────────────────────
+import { GameState, Player } from "../../../utils/type";
 
-export type ResourceOffer = Partial<resources>;
 
-export type TradeOfferInput =
-    | {
-        type: "PLAYER";
-        offeringPlayerId: UUID;
-        targetPlayerId: UUID;
-        offering: ResourceOffer;   // what the offering player gives
-        requesting: ResourceOffer; // what the offering player wants back
-    }
-    | {
-        type: "BANK";
-        offeringPlayerId: UUID;
-        offering: ResourceOffer;
-        requesting: ResourceOffer;
-    };
-
-export type TradeResult =
-    | { success: true; gameState: GameState }
-    | { success: false; reason: string };
-
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
-
-function totalResources(r: ResourceOffer): number {
-    return Object.values(r).reduce((sum, v) => sum + (v ?? 0), 0);
-}
-
-function hasEnoughResources(player: Player, offer: ResourceOffer): boolean {
-    return (Object.keys(offer) as (keyof resources)[]).every(
-        (resource) => player.resources[resource] >= (offer[resource] ?? 0)
-    );
-}
-
-function bankHasEnoughResources(
-    bank: GameState["bank"],
-    offer: ResourceOffer
-): boolean {
-    return (Object.keys(offer) as (keyof resources)[]).every(
-        (resource) => bank.resources[resource] >= (offer[resource] ?? 0)
-    );
-}
+// ============================================================
+// Resource Costs
+// ============================================================
 
 /**
- * Returns the best trade ratio a player has for a given resource.
- * Checks owned ports first, falls back to the default 4:1 ratio.
+ * Lookup table for the resource cost of each buildable action.
+ * Based on official Catan rules.
+ * "as const" locks these values so they can't be accidentally changed.
  */
-function getPlayerRatio(player: Player, resource: keyof resources): number {
-    let best = 4;
-    for (const port of player.portsOwned) {
-        if (port.type === resource && port.ratio === "2:1") return 2;
-        if (port.type === "THREE_TO_ONE") best = Math.min(best, 3);
-    }
-    return best;
-}
+const RESOURCE_COSTS = {
+    SETTLEMENT: { WOOD: 1, BRICK: 1, WOOL: 1, WHEAT: 1, ORE: 0 },
+    CITY:       { WOOD: 0, BRICK: 0, WOOL: 0, WHEAT: 2, ORE: 3 },
+    ROAD:       { WOOD: 1, BRICK: 1, WOOL: 0, WHEAT: 0, ORE: 0 },
+    DEV_CARD:   { WOOD: 0, BRICK: 0, WOOL: 1, WHEAT: 1, ORE: 1 },
+} as const;
 
 /**
- * Validates that a bank trade respects the player's port ratios.
- * Each resource being offered must satisfy the ratio for the resource
- * being requested (one resource type per trade).
+ * A type automatically derived from the keys of RESOURCE_COSTS.
+ * Can only be one of: "SETTLEMENT" | "CITY" | "ROAD" | "DEV_CARD"
  */
-function validateBankTradeRatios(
-    player: Player,
-    offering: ResourceOffer,
-    requesting: ResourceOffer
-): { valid: boolean; reason?: string } {
-    const requestedTypes = (Object.keys(requesting) as (keyof resources)[]).filter(
-        (r) => (requesting[r] ?? 0) > 0
-    );
-    const offeredTypes = (Object.keys(offering) as (keyof resources)[]).filter(
-        (r) => (offering[r] ?? 0) > 0
-    );
+type BuildAction = keyof typeof RESOURCE_COSTS;
 
-    if (requestedTypes.length !== 1) {
-        return {
-            valid: false,
-            reason: "Bank trades must request exactly one resource type.",
-        };
+
+// ============================================================
+// Piece Limits
+// ============================================================
+
+/**
+ * Maximum number of physical pieces each player is allowed to place.
+ * Based on official Catan rules.
+ */
+const PIECE_LIMITS = {
+    SETTLEMENT: 5,
+    CITY: 4,
+    ROAD: 15,
+} as const;
+
+
+// ============================================================
+// Validation Result
+// ============================================================
+
+/**
+ * Standard return type for all rule-checking functions in this file.
+ * - valid: true  → the action is allowed
+ * - valid: false → the action is not allowed, reason explains why
+ * - reason is optional and only included when valid is false
+ */
+type RuleResult = { valid: boolean; reason?: string };
+
+
+// ============================================================
+// Resource Cost Validation
+// ============================================================
+
+/**
+ * Checks whether a player has enough resources to perform a given action.
+ *
+ * @param player - The player attempting the action
+ * @param action - The action to check e.g. "SETTLEMENT", "CITY", "ROAD", "DEV_CARD"
+ * @returns RuleResult — valid if the player can afford it, invalid with reason if not
+ *
+ * @example
+ * canAfford(player, "SETTLEMENT")
+ * // Returns { valid: false, reason: "Insufficient WOOD: need 1, have 0" }
+ */
+export function canAfford(player: Player, action: BuildAction): RuleResult {
+    // Look up the resource cost for this action
+    const cost = RESOURCE_COSTS[action];
+
+    // Loop through each resource and its required amount
+    // e.g. resource = "WOOD", amount = 1
+    for (const [resource, amount] of Object.entries(cost)) {
+        const key = resource as keyof typeof player.resources;
+
+        // If the player doesn't have enough of this resource, return invalid immediately
+        if (player.resources[key] < amount) {
+            return {
+                valid: false,
+                reason: `Insufficient ${resource}: need ${amount}, have ${player.resources[key]}`,
+            };
+        }
     }
 
-    if (offeredTypes.length !== 1) {
+    // All resource checks passed
+    return { valid: true };
+}
+
+
+// ============================================================
+// Piece Count Validation
+// ============================================================
+
+/**
+ * Checks whether a player still has physical pieces remaining to place.
+ * Each player has a limited supply: 5 settlements, 4 cities, 15 roads.
+ *
+ * @param player - The player attempting to place a piece
+ * @param action - The piece type to check: "SETTLEMENT", "CITY", or "ROAD"
+ * @returns RuleResult — valid if pieces remain, invalid with reason if the limit is reached
+ *
+ * @example
+ * hasPiecesRemaining(player, "SETTLEMENT")
+ * // Returns { valid: false, reason: "No settlement pieces remaining (limit: 5)" }
+ */
+export function hasPiecesRemaining(player: Player, action: "SETTLEMENT" | "CITY" | "ROAD"): RuleResult {
+    // Map the action to how many of that piece the player has already placed
+    const placed = {
+        SETTLEMENT: player.pieces.settlementsPlaced,
+        CITY: player.pieces.citiesPlaced,
+        ROAD: player.pieces.roadsPlaced,
+    }[action];
+
+    // If they've hit or exceeded the limit, they have no pieces left
+    if (placed >= PIECE_LIMITS[action]) {
         return {
             valid: false,
-            reason: "Bank trades must offer exactly one resource type.",
-        };
-    }
-
-    const offeredResource = offeredTypes[0];
-    const offeredAmount = offering[offeredResource] ?? 0;
-    const requestedAmount = requesting[requestedTypes[0]] ?? 0;
-    const ratio = getPlayerRatio(player, offeredResource);
-
-    if (offeredAmount !== ratio * requestedAmount) {
-        return {
-            valid: false,
-            reason: `Bank trade ratio invalid. You need ${ratio} ${offeredResource} per 1 ${requestedTypes[0]} (you have a ${ratio}:1 port for this resource).`,
+            reason: `No ${action.toLowerCase()} pieces remaining (limit: ${PIECE_LIMITS[action]})`,
         };
     }
 
     return { valid: true };
 }
 
-function cloneGameState(state: GameState): GameState {
-    return JSON.parse(JSON.stringify(state));
-}
 
-// ─────────────────────────────────────────────
-// /gamelogic/gamerules — isTradePossible
-// ─────────────────────────────────────────────
+// ============================================================
+// Bank Availability
+// ============================================================
 
-export function isTradePossible(
+/**
+ * Checks whether the bank has enough of a specific resource to distribute.
+ * Used during the resource distribution phase (after a dice roll).
+ *
+ * @param gameState - The current game state containing the bank
+ * @param resource - The resource type to check e.g. "WOOD", "BRICK"
+ * @param amount - How many of that resource need to be distributed
+ * @returns RuleResult — valid if the bank has enough, invalid with reason if not
+ *
+ * @example
+ * bankCanDistribute(gameState, "WOOD", 3)
+ * // Returns { valid: false, reason: "Bank has insufficient WOOD: need 3, has 1" }
+ */
+export function bankCanDistribute(
     gameState: GameState,
-    offer: TradeOfferInput,
-    acceptedByTarget?: boolean
-): { possible: boolean; reason?: string } {
-    // Must be in TRADE phase (or BUFFER allowing trade)
-    if (gameState.phase !== "TRADE" && gameState.phase !== "BUFFER") {
-        return { possible: false, reason: "Trades can only occur during the TRADE or BUFFER phase." };
-    }
-
-    const offeringPlayer = gameState.players.find(
-        (p) => p.playerId === offer.offeringPlayerId
-    );
-    if (!offeringPlayer) {
-        return { possible: false, reason: "Offering player not found." };
-    }
-
-    // The offering player must be the active player (first in queue)
-    if (gameState.players[0].playerId !== offer.offeringPlayerId) {
-        return { possible: false, reason: "Only the active player can initiate a trade." };
-    }
-
-    // Offering player must have the resources they are offering
-    if (!hasEnoughResources(offeringPlayer, offer.offering)) {
-        return { possible: false, reason: "Offering player does not have enough resources." };
-    }
-
-    if (offer.type === "PLAYER") {
-        // After acceptance is confirmed, re-check target player still has the goods
-        if (acceptedByTarget) {
-            const targetPlayer = gameState.players.find(
-                (p) => p.playerId === offer.targetPlayerId
-            );
-            if (!targetPlayer) {
-                return { possible: false, reason: "Target player not found." };
-            }
-            if (!hasEnoughResources(targetPlayer, offer.requesting)) {
-                return {
-                    possible: false,
-                    reason: "Target player no longer has the requested resources.",
-                };
-            }
-        }
-    }
-
-    if (offer.type === "BANK") {
-        const ratioCheck = validateBankTradeRatios(
-            offeringPlayer,
-            offer.offering,
-            offer.requesting
-        );
-        if (!ratioCheck.valid) {
-            return { possible: false, reason: ratioCheck.reason };
-        }
-        if (!bankHasEnoughResources(gameState.bank, offer.requesting)) {
-            return { possible: false, reason: "The bank does not have enough of the requested resource." };
-        }
-    }
-
-    return { possible: true };
-}
-
-// ─────────────────────────────────────────────
-// Create trade offer
-// ─────────────────────────────────────────────
-
-export function createTradeOffer(
-    gameState: GameState,
-    offer: TradeOfferInput
-): TradeResult {
-    // Pre-offer validation
-    const preCheck = isTradePossible(gameState, offer);
-    if (!preCheck.possible) {
-        return { success: false, reason: preCheck.reason! };
-    }
-
-    const newState = cloneGameState(gameState);
-    newState.phase = "TRADE";
-
-    if (offer.type === "PLAYER") {
-        const trade: Trade = {
-            player1: offer.offeringPlayerId,
-            player2: offer.targetPlayerId,
-            resources: {
-                WOOD: (offer.offering.WOOD ?? 0) - (offer.requesting.WOOD ?? 0),
-                BRICK: (offer.offering.BRICK ?? 0) - (offer.requesting.BRICK ?? 0),
-                WOOL: (offer.offering.WOOL ?? 0) - (offer.requesting.WOOL ?? 0),
-                WHEAT: (offer.offering.WHEAT ?? 0) - (offer.requesting.WHEAT ?? 0),
-                ORE: (offer.offering.ORE ?? 0) - (offer.requesting.ORE ?? 0),
-            },
-            isActive: true,
-            accepted: false,
-        };
-
-        newState.tradeState = {
-            trades: [...(newState.tradeState?.trades ?? []), trade],
+    resource: keyof GameState["bank"]["resources"],
+    amount: number
+): RuleResult {
+    if (gameState.bank.resources[resource] < amount) {
+        return {
+            valid: false,
+            reason: `Bank has insufficient ${resource}: need ${amount}, has ${gameState.bank.resources[resource]}`,
         };
     }
-
-    // Bank trades have no pending offer — they go straight to resolveTradeOffer
-    return { success: true, gameState: newState };
+    return { valid: true };
 }
 
-// ─────────────────────────────────────────────
-// Execute the actual resource swap
-// ─────────────────────────────────────────────
+/**
+ * Checks whether the bank still has development cards available to purchase.
+ *
+ * @param gameState - The current game state containing the bank
+ * @returns RuleResult — valid if cards remain, invalid if the deck is empty
+ */
+export function bankHasDevCards(gameState: GameState): RuleResult {
+    if (gameState.bank.developmentCardsRemaining <= 0) {
+        return { valid: false, reason: "No development cards remaining in bank" };
+    }
+    return { valid: true };
+}
 
-function executeTrade(
-    gameState: GameState,
-    offer: TradeOfferInput
-): GameState {
-    const newState = cloneGameState(gameState);
 
-    const offeringPlayer = newState.players.find(
-        (p) => p.playerId === offer.offeringPlayerId
-    )!;
+// ============================================================
+// Build Validation
+// ============================================================
+// Convenience functions that run both the resource cost check and the
+// piece limit check in one call. Turn management calls these directly.
+// They return early with the failure reason if either check fails.
 
-    if (offer.type === "PLAYER") {
-        const targetPlayer = newState.players.find(
-            (p) => p.playerId === offer.targetPlayerId
-        )!;
+/**
+ * Checks whether a player can build a settlement.
+ * Validates both resource cost (1 wood, 1 brick, 1 wool, 1 wheat)
+ * and remaining piece count (max 5 settlements).
+ *
+ * @param player - The player attempting to build
+ * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
+ */
+export function canBuildSettlement(player: Player): RuleResult {
+    const affordable = canAfford(player, "SETTLEMENT");
+    if (!affordable.valid) return affordable;        // fails here if not enough resources
+    return hasPiecesRemaining(player, "SETTLEMENT"); // fails here if no pieces left
+}
 
-        // Transfer offering → target
-        (Object.keys(offer.offering) as (keyof resources)[]).forEach((r) => {
-            offeringPlayer.resources[r] -= offer.offering[r] ?? 0;
-            targetPlayer.resources[r] += offer.offering[r] ?? 0;
-        });
+/**
+ * Checks whether a player can upgrade a settlement to a city.
+ * Validates resource cost (2 wheat, 3 ore), piece limit (max 4 cities),
+ * and that a settlement exists to upgrade.
+ * The specific vertex check requires board state from the CV engine.
+ *
+ * @param player - The player attempting to upgrade
+ * @returns RuleResult — valid if all checks pass, invalid with reason if any fail
+ */
+export function canUpgradeToCity(player: Player): RuleResult {
+    const affordable = canAfford(player, "CITY");
+    if (!affordable.valid) return affordable;
 
-        // Transfer requesting → offeringPlayer
-        (Object.keys(offer.requesting) as (keyof resources)[]).forEach((r) => {
-            targetPlayer.resources[r] -= offer.requesting[r] ?? 0;
-            offeringPlayer.resources[r] += offer.requesting[r] ?? 0;
-        });
+    const piecesLeft = hasPiecesRemaining(player, "CITY");
+    if (!piecesLeft.valid) return piecesLeft;
 
-        // Mark trade complete — remove active trade from tradeState
-        newState.tradeState = {
-            trades:
-                newState.tradeState?.trades.map((t) =>
-                    t.player1 === offer.offeringPlayerId &&
-                        t.player2 === offer.targetPlayerId &&
-                        t.isActive
-                        ? { ...t, isActive: false, accepted: true }
-                        : t
-                ) ?? [],
+    // citiesPlaced can never exceed settlementsPlaced since cities replace settlements
+    // If they're equal, all settlements have already been upgraded — nothing left to upgrade
+    if (player.pieces.settlementsPlaced <= player.pieces.citiesPlaced) {
+        return { valid: false, reason: "No settlements available to upgrade to a city" };
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Checks whether a player can build a road.
+ * Validates both resource cost (1 wood, 1 brick)
+ * and remaining piece count (max 15 roads).
+ *
+ * @param player - The player attempting to build
+ * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
+ */
+export function canBuildRoad(player: Player): RuleResult {
+    const affordable = canAfford(player, "ROAD");
+    if (!affordable.valid) return affordable;
+    return hasPiecesRemaining(player, "ROAD");
+}
+
+/**
+ * Checks whether a player can buy a development card.
+ * Validates both resource cost (1 wool, 1 wheat, 1 ore)
+ * and whether the bank still has development cards remaining.
+ *
+ * @param player - The player attempting to buy
+ * @param gameState - The current game state (needed to check bank stock)
+ * @returns RuleResult — valid if both checks pass, invalid with reason if either fails
+ */
+export function canBuyDevCard(player: Player, gameState: GameState): RuleResult {
+    const affordable = canAfford(player, "DEV_CARD");
+    if (!affordable.valid) return affordable;
+    return bankHasDevCards(gameState);
+}
+
+
+// ============================================================
+// Robber
+// ============================================================
+
+/**
+ * Checks whether a player can steal a resource from a target player.
+ * A player cannot steal from someone who has no resources.
+ *
+ * @param target - The player being stolen from
+ * @returns RuleResult — valid if the target has resources, invalid if their hand is empty
+ */
+export function canStealFrom(target: Player): RuleResult {
+    const totalResources = Object.values(target.resources).reduce((sum, amount) => sum + amount, 0);
+    if (totalResources === 0) {
+        return { valid: false, reason: `${target.name} has no resources to steal` };
+    }
+    return { valid: true };
+}
+
+
+// ============================================================
+// Victory Condition
+// ============================================================
+
+/**
+ * Calculates a player's total victory points from all sources:
+ * - Settlements (1 VP each)
+ * - Cities (2 VP each, upgraded from settlements)
+ * - Victory Point development cards
+ * - Longest Road bonus (2 VP)
+ * - Largest Army bonus (2 VP)
+ *
+ * @param player - The player to calculate VP for
+ * @returns The player's total victory points as a number
+ *
+ * @example
+ * calculateVictoryPoints(player) // Returns 7
+ */
+export function calculateVictoryPoints(player: Player): number {
+    let vp = 0;
+
+    // Cities are upgraded from settlements, so we subtract citiesPlaced
+    // from settlementsPlaced to avoid counting upgraded spots twice.
+    // Example: 3 settlements placed, 1 upgraded to a city
+    //   → (3 - 1) = 2 remaining settlements × 1 VP = 2 VP
+    //   → 1 city × 2 VP = 2 VP
+    //   → total from buildings = 4 VP
+    vp += (player.pieces.settlementsPlaced - player.pieces.citiesPlaced);
+    vp += player.pieces.citiesPlaced * 2;
+
+    // VP development cards are kept secret and only revealed when a player wins
+    vp += player.developmentCards.VICTORY_POINT;
+
+    // Longest Road: awarded to the player with the longest continuous road (min 5)
+    // Only one player can hold this bonus at a time
+    if (player.achievements.hasLongestRoad) vp += 2;
+
+    // Largest Army: awarded to the player who has played the most Knight cards (min 3)
+    // Only one player can hold this bonus at a time
+    if (player.achievements.hasLargestArmy) vp += 2;
+
+    return vp;
+}
+
+/**
+ * Checks whether a player has reached 10 victory points and won the game.
+ *
+ * @param player - The player to check
+ * @returns RuleResult — valid: true if the player has won, with their VP count in the reason
+ *
+ * @example
+ * checkVictoryCondition(player)
+ * // Returns { valid: true, reason: "Alice wins with 10 victory points" }
+ * // or      { valid: false, reason: "Alice has 7/10 victory points" }
+ */
+export function checkVictoryCondition(player: Player): RuleResult {
+    const vp = calculateVictoryPoints(player);
+    if (vp >= 10) {
+        return { valid: true, reason: `${player.name} wins with ${vp} victory points` };
+    }
+    return { valid: false, reason: `${player.name} has ${vp}/10 victory points` };
+}
+
+/**
+ * Checks whether a player can claim the Largest Army bonus.
+ * Requires at least 3 knights played, and more than the current holder.
+ *
+ * @param player - The player attempting to claim Largest Army
+ * @param gameState - The current game state (used to find the current holder's army size)
+ * @returns RuleResult — valid if the player qualifies, invalid with reason if not
+ */
+export function canClaimLargestArmy(player: Player, gameState: GameState): RuleResult {
+    // Must have played at least 3 knight cards
+    if (player.achievements.armySize < 3) {
+        return {
+            valid: false,
+            reason: `Army size too small: need at least 3 knights, have ${player.achievements.armySize}`,
         };
     }
 
-    if (offer.type === "BANK") {
-        // Player gives resources to bank
-        (Object.keys(offer.offering) as (keyof resources)[]).forEach((r) => {
-            offeringPlayer.resources[r] -= offer.offering[r] ?? 0;
-            newState.bank.resources[r] += offer.offering[r] ?? 0;
-        });
+    // Find the current Largest Army holder (if any)
+    const currentHolder = gameState.players.find(p => p.achievements.hasLargestArmy);
 
-        // Bank gives resources to player
-        (Object.keys(offer.requesting) as (keyof resources)[]).forEach((r) => {
-            newState.bank.resources[r] -= offer.requesting[r] ?? 0;
-            offeringPlayer.resources[r] += offer.requesting[r] ?? 0;
-        });
+    // If someone already holds it, this player must have strictly more knights
+    if (currentHolder && player.achievements.armySize <= currentHolder.achievements.armySize) {
+        return {
+            valid: false,
+            reason: `Must have more knights than current holder (${currentHolder.name} has ${currentHolder.achievements.armySize})`,
+        };
     }
 
-    // Trade complete — clear active tradeState and return to BUFFER
-    newState.tradeState = null;
-    newState.phase = "BUFFER";
-
-    return newState;
+    return { valid: true };
 }
 
-// ─────────────────────────────────────────────
-// Resolve offer: accept or reject
-// ─────────────────────────────────────────────
-
-export function resolveTradeOffer(
-    gameState: GameState,
-    offer: TradeOfferInput,
-    accepted: boolean
-): TradeResult {
-    if (!accepted) {
-        // Trade rejected — clear tradeState and move to BUFFER
-        const newState = cloneGameState(gameState);
-        newState.tradeState = null;
-        newState.phase = "BUFFER";
-        return { success: true, gameState: newState };
+/**
+ * Checks whether a player can claim the Longest Road bonus.
+ * Requires at least 5 connected roads, and a longer road than the current holder.
+ * Note: actual road length calculation requires board state from the CV engine.
+ *
+ * @param claimedLength - The road length being claimed (calculated by CV/board logic)
+ * @param gameState - The current game state (used to find the current holder's road length)
+ * @returns RuleResult — valid if the player qualifies, invalid with reason if not
+ */
+export function canClaimLongestRoad(claimedLength: number, gameState: GameState): RuleResult {
+    // Must have at least 5 connected roads
+    if (claimedLength < 5) {
+        return {
+            valid: false,
+            reason: `Road too short: need at least 5 connected roads, have ${claimedLength}`,
+        };
     }
 
-    // Re-validate with acceptedByTarget = true before executing
-    const postCheck = isTradePossible(gameState, offer, true);
-    if (!postCheck.possible) {
-        return { success: false, reason: postCheck.reason! };
+    // Find the current Longest Road holder (if any)
+    const currentHolder = gameState.players.find(p => p.achievements.hasLongestRoad);
+
+    // If someone already holds it, this player must have strictly more roads
+    if (currentHolder && claimedLength <= currentHolder.achievements.longestRoadLength) {
+        return {
+            valid: false,
+            reason: `Road not long enough: must beat current holder (${currentHolder.name} has ${currentHolder.achievements.longestRoadLength})`,
+        };
     }
 
-    const finalState = executeTrade(gameState, offer);
-    return { success: true, gameState: finalState };
+    return { valid: true };
 }
 
-// ─────────────────────────────────────────────
-// Convenience: one-call bank trade (auto-accepts)
-// ─────────────────────────────────────────────
 
-export function bankTrade(
-    gameState: GameState,
-    offeringPlayerId: UUID,
-    offering: ResourceOffer,
-    requesting: ResourceOffer
-): TradeResult {
-    const offer: TradeOfferInput = {
-        type: "BANK",
-        offeringPlayerId,
-        offering,
-        requesting,
-    };
-
-    const create = createTradeOffer(gameState, offer);
-    if (!create.success) return create;
-
-    // Bank trades auto-accept — no target player needed
-    return resolveTradeOffer(create.gameState, offer, true);
-}
