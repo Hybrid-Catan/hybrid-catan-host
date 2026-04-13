@@ -39,7 +39,6 @@ export type Player = {
     }
 }
 
-
 export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
