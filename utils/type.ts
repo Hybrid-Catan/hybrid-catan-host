@@ -1,4 +1,4 @@
-import { UUID } from "crypto"
+type UUID = string;
 
 export type Player = {
     "playerId": UUID,
@@ -27,15 +27,13 @@ export type Player = {
     "achievements": {
         "hasLongestRoad": boolean,
         "longestRoadLength": number,
-        "hasLargestArmy": boolean
+        "hasLargestArmy": boolean,
         "armySize": number,
     },
-    "portsOwned": [
-        {
-            "type": "WOOD" | "BRICK" | "WOOL" | "WHEAT" | "ORE" | "THREE_TO_ONE",
-            "ratio": "2:1 | 3:1"
-        }
-    ],
+    "portsOwned": {
+        "type": "WOOD" | "BRICK" | "WOOL" | "WHEAT" | "ORE" | "THREE_TO_ONE";
+        "ratio": "2:1" | "3:1";
+    }[];
     "turnState": {
         "currentPhase": "SETUP" | "ROLL" | "TRADE" | "BUILD" | "END"
     }
@@ -49,18 +47,18 @@ export type GameState = {
     "phase": "SETUP_1" | "SETUP_2" | "ROLL" | "TRADE" | "BUILD" | "END",
 
     "dice": {
-        "sum": 0
+        "sum": number
     },
 
     "bank": {
         "resources": {
-            "WOOD": 19,
-            "BRICK": 19,
-            "WOOL": 19,
-            "WHEAT": 19,
-            "ORE": 19
+            "WOOD": number,
+            "BRICK": number,
+            "WOOL": number,
+            "WHEAT": number,
+            "ORE": number
         },
-        "developmentCardsRemaining": 25
+        "developmentCardsRemaining": number
     },
 
     "developmentDeck": {
