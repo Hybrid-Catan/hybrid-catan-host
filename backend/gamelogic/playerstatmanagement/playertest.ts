@@ -1,4 +1,6 @@
-import type { Player } from "../../../utils/type.ts";
+import type { Player, GameState } from "../../../utils/type.ts";
+import { gameStep, startGame } from "../initilaisaiton/init.ts";
+
 import {
   startTurn,
   moveToBuild,
@@ -11,7 +13,7 @@ import {
   buyDevCard,
   playKnight,
   tradePlayers,
-  calculateVP,
+  getVictoryPoints,
   updateLargestArmy,
   updateLongestRoad,
   getTradeRatio
@@ -21,6 +23,39 @@ function log(title: string, data: any) {
   console.log(`\n=== ${title} ===`);
   console.log(JSON.stringify(data, null, 2));
 }
+
+const gameState: GameState = {
+  gameId: "test-game",
+  status: "SETUP",
+  players: [],
+  phase: "SETUP_1",
+  dice: {
+    sum: 0
+  },
+  bank: {
+    resources: {
+      WOOD: 19,
+      BRICK: 19,
+      WOOL: 19,
+      WHEAT: 19,
+      ORE: 19
+    },
+    developmentCardsRemaining: 10
+  },
+  developmentDeck: {
+    KNIGHT: 5,
+    MONOPOLY: 2,
+    ROAD_BUILDING: 2,
+    INVENTION: 2,
+    VICTORY_POINT: 5
+  },
+  tradeState: {
+    Trades: []
+  },
+  winner: {
+    playerId: "0" as any
+  }
+};
 
 // Fake players
 const player1: Player = {
@@ -88,8 +123,13 @@ const player2: Player = {
   portsOwned: []
 };
 
-// Dev card deck
-const devDeck = ["KNIGHT", "VICTORY_POINT", "MONOPOLY"] as const;
+gameState.players = [player1, player2];
+
+let devDeck: ("KNIGHT" | "VICTORY_POINT" | "MONOPOLY")[] = [
+  "KNIGHT",
+  "VICTORY_POINT",
+  "MONOPOLY"
+];
 
 // Turn flow
 startTurn(player1);
@@ -116,9 +156,9 @@ console.log("\nAdd Resources");
 addResource(player1, "WOOD", 2);
 log("After adding WOOD", player1.resources);
 
-// Developemnt Cards
+// Development Cards
 console.log("\nBuy Dev Card");
-const card = buyDevCard(player1, [...devDeck]);
+const card = buyDevCard(player1, devDeck, gameState);
 console.log("Got card:", card);
 log("Dev cards", player1.developmentCards);
 
@@ -150,11 +190,20 @@ log("Player2 achievements", player2.achievements);
 
 // Victory points
 console.log("\nVictory Points");
-const vp1 = calculateVP(player1);
-const vp2 = calculateVP(player2);
+const vp1 = getVictoryPoints(player1);
+const vp2 = getVictoryPoints(player2);
 
 console.log("Player1 VP:", vp1);
 console.log("Player2 VP:", vp2);
 
 endTurn(player1);
 log("End turn phase", player1.turnState);
+
+console.log("----------");
+
+startGame(gameState);
+
+for (let i = 0; i < 5; i++) {
+  console.log(`\n--- TURN ${i + 1} ---`);
+  gameStep(gameState);
+}
