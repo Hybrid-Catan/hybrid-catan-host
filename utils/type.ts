@@ -61,8 +61,8 @@ export type achievements = {
  * isActive is true while the offer is pending; accepted reflects the target's response.
  */
 export type Trade = {
-    player1: UUID;
-    player2: UUID;
+    sender: UUID;
+    receiver: UUID;
     resourcesCards: resourcesCards;
     isActive: boolean;
     accepted: boolean;
