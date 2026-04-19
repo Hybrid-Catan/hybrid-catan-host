@@ -1,0 +1,5 @@
+//checkSenderTradeRequest checks if the sender has enough resources to offer in the trade. It takes in the sender's inventory and the resources they are offering, and returns a boolean indicating whether the trade request is valid or not. This function will be used in the trading module to validate trade proposals before they are sent to the receiver.
+import { GameState, resourcesCards } from "../../../utils/type";
+
+export function checkSenderTradeRequest(GameState: GameState): boolean { return true; }
+// Note (To be deleted): the sender is the player with active turn can be taken out index 0 from the GameState.players array. The resources they are offering can be compared against their resourcesCards to check if they have enough resources to offer in the trade. If the sender does not have enough resources, the function should return false, indicating that the trade request is invalid irrespective of the reciever.
