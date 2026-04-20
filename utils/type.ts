@@ -1,82 +1,4 @@
-import { UUID } from "crypto";
-
-/**
- * Represents the five resource card types in Catan.
- * Used by players, the bank, and trade offers to track resource quantities.
- */
-export type resourcesCards = {
-    WOOD: number;
-    BRICK: number;
-    WOOL: number;
-    WHEAT: number;
-    ORE: number;
-};
-
-/**
- * Represents the five development card types a player can hold.
- * Quantities are tracked per card type rather than as a flat list.
- */
-export type developmentCards = {
-    KNIGHT: number;
-    MONOPOLY: number;
-    ROAD_BUILDING: number;
-    INVENTION: number;
-    VICTORY_POINT: number;
-};
-
-/**
- * Tracks how many of each piece type a player has placed on the board.
- * Used to enforce placement limits (5 settlements, 4 cities, 15 roads per player).
- */
-export type pieces = {
-    settlementsPlaced: number;
-    citiesPlaced: number;
-    roadsPlaced: number;
-};
-
-/**
- * Represents a single port owned by a player.
- * The port type determines which resource gets a favourable trade ratio with the bank.
- * Resource-specific ports grant 2:1; THREE_TO_ONE grants 3:1 on any resource.
- */
-export type portsOwned = {
-    type: "WOOD" | "BRICK" | "WOOL" | "WHEAT" | "ORE" | "THREE_TO_ONE";
-};
-
-/**
- * Tracks a player's special achievement statuses.
- * Longest Road (5+ roads) and Largest Army (3+ knights) each grant 2 bonus victory points.
- */
-export type achievements = {
-    hasLongestRoad: boolean;
-    longestRoadLength: number;
-    hasLargestArmy: boolean;
-    armySize: number;
-};
-
-/**
- * Represents a single trade offer between two players.
- * The resourcesCards field encodes the net delta from player1's perspective —
- * positive values are what player1 gives, negative values are what player1 receives.
- * isActive is true while the offer is pending; accepted reflects the target's response.
- */
-export type Trade = {
-    sender: UUID;
-    receiver: UUID;
-    sendingCards: resourcesCards;
-    receivingCards: resourcesCards;
-    isActive: boolean;
-    canAccept: boolean;
-    accepted: boolean;
-};
-
-/**
- * Holds all trade offers active during the current turn's trade phase.
- * Cleared to null once the turn moves past TRADE/BUFFER back to the next player.
- */
-export type TradeState = {
-    trades: Trade[];
-};
+type UUID = string;
 
 /**
  * The turn phase state machine for a single player's turn.
@@ -103,16 +25,43 @@ export type dice = {
  * the first element is always the active player.
  */
 export type Player = {
-    playerId: UUID;
-    name: string;
-    color: "BLUE" | "RED" | "WHITE" | "ORANGE";
-    victoryPoints: number;
-    resourcesCards: resourcesCards;
-    developmentCards: developmentCards;
-    pieces: pieces;
-    achievements: achievements;
-    portsOwned: portsOwned;
-};
+    "playerId": UUID,
+    "name": string,
+    "color": "BLUE" | "RED" | "WHITE" | "ORANGE",
+    "victoryPoints": number,
+    "resources": {
+        "WOOD": number,
+        "BRICK": number,
+        "WOOL": number,
+        "WHEAT": number,
+        "ORE": number
+    },
+    "developmentCards": {
+        "KNIGHT": number,
+        "MONOPOLY": number,
+        "ROAD_BUILDING": number,
+        "INVENTION": number,
+        "VICTORY_POINT": number
+    },
+    "pieces": {
+        "settlementsPlaced": number,
+        "citiesPlaced": number,
+        "roadsPlaced": number,
+    },
+    "achievements": {
+        "hasLongestRoad": boolean,
+        "longestRoadLength": number,
+        "hasLargestArmy": boolean,
+        "armySize": number,
+    },
+    "portsOwned": {
+        "type": "WOOD" | "BRICK" | "WOOL" | "WHEAT" | "ORE" | "THREE_TO_ONE";
+        "ratio": "2:1" | "3:1";
+    }[];
+    "turnState": {
+        "currentPhase": "SETUP" | "ROLL" | "TRADE" | "BUILD" | "END"
+    }
+}
 
 /**
  * The root game state object. Single source of truth for the entire game.
@@ -122,27 +71,51 @@ export type Player = {
  * a player reaches the victory point threshold.
  */
 export type GameState = {
-    gameId: string;
-    status: "SETUP" | "IN_PROGRESS" | "FINISHED";
-    players: Player[];
-    phase: phase;
-    dice: dice;
-    bank: {
-        bankId: UUID;
-        resourcesCards: resourcesCards;
-        developmentCards: developmentCards;
-    };
-    tradeState: TradeState;
-    winner: UUID | null;
-};
+    "gameId": string,
+    "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
+    "players": Player[],// in queue
+    "phase": "SETUP_1" | "SETUP_2" | "ROLL" | "TRADE" | "BUILD" | "END",
 
-export type TradeRequest = {
-    sender: UUID;
-    receiver: UUID;
-    sendingCards: resourcesCards;
-    receivingCards: resourcesCards;
-};
+    "dice": {
+        "sum": number
+    },
 
-export type Result =
-    | { success: true; data: any }
-    | { success: false; error: string };
+    "bank": {
+        "resources": {
+            "WOOD": number,
+            "BRICK": number,
+            "WOOL": number,
+            "WHEAT": number,
+            "ORE": number
+        },
+        "developmentCardsRemaining": number
+    },
+
+    "developmentDeck": {
+        "KNIGHT": number,
+        "MONOPOLY": number,
+        "ROAD_BUILDING": number,
+        "INVENTION": number,
+        "VICTORY_POINT": number
+    },
+
+    "tradeState": {
+        "Trades": {
+            "player1": UUID,
+            "player2": UUID,
+            "Resources": {
+                "WOOD": number,
+                "BRICK": number,
+                "WOOL": number,
+                "WHEAT": number,
+                "ORE": number
+            },
+            "isActive": boolean,
+            "Accepted": boolean,
+        }[]
+    },
+
+    "winner": {
+        "playerId": UUID,
+    }
+}
