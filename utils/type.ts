@@ -63,8 +63,10 @@ export type achievements = {
 export type Trade = {
     sender: UUID;
     receiver: UUID;
-    resourcesCards: resourcesCards;
+    sendingCards: resourcesCards;
+    receivingCards: resourcesCards;
     isActive: boolean;
+    canAccept: boolean;
     accepted: boolean;
 };
 
@@ -126,9 +128,21 @@ export type GameState = {
     phase: phase;
     dice: dice;
     bank: {
+        bankId: UUID;
         resourcesCards: resourcesCards;
         developmentCards: developmentCards;
     };
-    tradeState: TradeState | null;
+    tradeState: TradeState;
     winner: UUID | null;
 };
+
+export type TradeRequest = {
+    sender: UUID;
+    receiver: UUID;
+    sendingCards: resourcesCards;
+    receivingCards: resourcesCards;
+};
+
+export type Result =
+    | { success: true; data: any }
+    | { success: false; error: string };
