@@ -6,7 +6,7 @@
  * and return a result, but do NOT modify any game state themselves.
  */
 
-import { GameState, Player } from "../../../utils/type";
+import type { GameState, Player } from "../../../utils/type.ts";
 
 
 // ============================================================
@@ -400,5 +400,3 @@ export function canClaimLongestRoad(claimedLength: number, gameState: GameState)
 
     return { valid: true };
 }
-
-
