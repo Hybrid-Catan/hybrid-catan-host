@@ -1,5 +1,29 @@
 type UUID = string;
 
+/**
+ * The turn phase state machine for a single player's turn.
+ * - SETUP_1 / SETUP_2: initial placement rounds before the main game.
+ * - ROLL: player must roll the dice before any other action.
+ * - BUFFER: post-roll window where the player may trade or build.
+ * - TRADE: active trade negotiation is in progress.
+ * - BUILD: player is placing roads, settlements, cities, or buying dev cards.
+ * - END: player signals end of turn; control passes to the next player.
+ */
+export type phase = "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "END";
+
+/**
+ * The result of a dice roll for the current turn.
+ * sum ranges from 2–12; a sum of 7 triggers robber movement.
+ */
+export type dice = {
+    sum: number;
+};
+
+/**
+ * Represents a single player and all their in-game state.
+ * Players are stored in turn order in GameState.players —
+ * the first element is always the active player.
+ */
 export type Player = {
     "playerId": UUID,
     "name": string,
@@ -39,6 +63,13 @@ export type Player = {
     }
 }
 
+/**
+ * The root game state object. Single source of truth for the entire game.
+ * players is ordered by turn — index 0 is the current active player.
+ * After a turn ends, the active player is moved to the back of the array.
+ * tradeState is null when no trade is in progress, and winner is null until
+ * a player reaches the victory point threshold.
+ */
 export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
