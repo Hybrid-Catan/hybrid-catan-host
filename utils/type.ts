@@ -25,6 +25,7 @@ export type dice = {
  * the first element is always the active player.
  */
 export type Player = {
+    "sequence": number,
     "playerId": UUID,
     "name": string,
     "color": "BLUE" | "RED" | "WHITE" | "ORANGE",
@@ -59,7 +60,7 @@ export type Player = {
         "ratio": "2:1" | "3:1";
     }[];
     "turnState": {
-        "currentPhase": "SETUP" | "ROLL" | "TRADE" | "BUILD" | "END"
+        "currentPhase": "SETUP_1" | "SETUP_2" | "ROLL" | "TRADE" | "BUILD" | "END"
     }
 }
 
