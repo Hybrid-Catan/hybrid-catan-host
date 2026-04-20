@@ -73,7 +73,7 @@ export type Player = {
 export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
-    "players": Player[],// in queue
+    "players": Player[], // in queue
     "phase": "SETUP_1" | "SETUP_2" | "ROLL" | "TRADE" | "BUILD" | "END",
 
     "dice": {
