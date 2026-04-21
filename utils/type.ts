@@ -19,6 +19,24 @@ export type dice = {
     sum: number;
 };
 
+
+export type trade = {
+    "player1": UUID,
+    "player2": UUID,
+    "Resources": {
+        "WOOD": number,
+        "BRICK": number,
+        "WOOL": number,
+        "WHEAT": number,
+        "ORE": number
+    },
+    "isActive": boolean,
+    canAccept: boolean,
+    "Accepted": boolean,
+}
+
+export type color = "BLUE" | "RED" | "WHITE" | "ORANGE";
+
 /**
  * Represents a single player and all their in-game state.
  * Players are stored in turn order in GameState.players —
@@ -71,7 +89,7 @@ export type Player = {
 export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
-    "players": Player[], // in queue
+    "players": Player[],// in queue
     "phase": "SETUP_1" | "SETUP_2" | "ROLL" | "TRADE" | "BUILD" | "END",
 
     "dice": {
@@ -98,19 +116,7 @@ export type GameState = {
     },
 
     "tradeState": {
-        "Trades": {
-            "player1": UUID,
-            "player2": UUID,
-            "Resources": {
-                "WOOD": number,
-                "BRICK": number,
-                "WOOL": number,
-                "WHEAT": number,
-                "ORE": number
-            },
-            "isActive": boolean,
-            "Accepted": boolean,
-        }[]
+        trades: trade[];
     },
 
     "winner": {
