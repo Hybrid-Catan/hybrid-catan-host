@@ -1,6 +1,11 @@
 import { UUID } from "crypto";
 import type { GameState, Player } from "../../../utils/type.ts";
 
+
+export function getTurnPlayerId(gameState: GameState): UUID {
+    return gameState.players[0].playerId;
+}
+
 export function setPhaseToSetup1(gameState:GameState)
 {
     gameState.status = "IN_PROGRESS";

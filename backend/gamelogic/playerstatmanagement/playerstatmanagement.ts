@@ -1,4 +1,5 @@
-import type { Player } from "../../../utils/type.ts";
+import { UUID } from "crypto";
+import type { GameState, Player } from "../../../utils/type.ts";
 import {
   canBuildSettlement,
   canUpgradeToCity,
@@ -6,6 +7,7 @@ import {
   canBuyDevCard,
   calculateVictoryPoints
 } from "../gamerules/gamerules.ts";
+import { getTurnPlayerId } from "../turnmanagement/turnmanagment.ts";
 
 type Resource = keyof Player["resourceCards"];
 type DevCard = keyof Player["developmentCards"];
@@ -70,14 +72,27 @@ const ROAD_COST = {
   BRICK: 1,
 };
 
-export function buildRoad(player: Player): boolean {
+export function buildRoad(gameState: GameState): GameState | false {
+  const playerId = getTurnPlayerId(gameState);
+  const player = gameState.players.find(p => p.playerId === playerId);
+  if (!player) {
+    return false
+  };
+  if (gameState.phase === "SETUP_1") {
+    player.pieces.roadsPlaced += 1;
+    return {
+      ...gameState,
+    };
+  }
   const check = canBuildRoad(player);
   if (!check.valid) {
     return false;
   }
   spendResources(player, ROAD_COST);
   player.pieces.roadsPlaced += 1;
-  return true;
+  return {
+    ...gameState,
+  };
 }
 
 const DEV_COST = {

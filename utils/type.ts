@@ -1,4 +1,5 @@
-type UUID = string;
+import { UUID } from "crypto";
+
 
 /**
  * The turn phase state machine for a single player's turn.
