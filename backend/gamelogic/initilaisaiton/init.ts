@@ -11,27 +11,26 @@ export function initGameState(): GameState {
       sum: 0
     },
     bank: {
-      resources: {
+      resourceCards: {
         WOOD: 19,
         BRICK: 19,
         WOOL: 19,
         WHEAT: 19,
         ORE: 19
       },
-      developmentCardsRemaining: 25
-    },
-    developmentDeck: {
-      KNIGHT: 14,
-      MONOPOLY: 2,
-      ROAD_BUILDING: 2,
-      INVENTION: 2,
-      VICTORY_POINT: 5
+      developmentCards: {
+        KNIGHT: 14,
+        MONOPOLY: 2,
+        ROAD_BUILDING: 2,
+        INVENTION: 2,
+        VICTORY_POINT: 5
+      }
     },
     tradeState: {
       trades: []
     },
     winner: {
-      playerId:""
+      playerId: "" as UUID
     }
   };
 }
@@ -42,7 +41,6 @@ export function initPlayer(
   sequence: number,
   gameState: GameState
 ): GameState {
-
   const colorTaken = gameState.players.some(p => p.color === color);
 
   if (colorTaken) {
@@ -59,7 +57,7 @@ export function initPlayer(
 
     victoryPoints: 0,
 
-    resources: {
+    resourceCards: {
       WOOD: 0,
       BRICK: 0,
       WOOL: 0,
@@ -88,7 +86,7 @@ export function initPlayer(
       armySize: 0
     },
 
-    portsOwned: [],
+    portsOwned: []
   };
 
   const players = [...gameState.players];
@@ -106,4 +104,3 @@ export function initPlayer(
     players
   };
 }
-

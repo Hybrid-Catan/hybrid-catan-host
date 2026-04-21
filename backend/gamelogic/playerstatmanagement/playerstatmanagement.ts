@@ -7,7 +7,7 @@ import {
   calculateVictoryPoints
 } from "../gamerules/gamerules.ts";
 
-type Resource = keyof Player["resources"];
+type Resource = keyof Player["resourceCards"];
 type DevCard = keyof Player["developmentCards"];
 type Port = Player["portsOwned"][number];
 
@@ -16,7 +16,7 @@ export function addResource(
   resource: Resource,
   amount: number
 ) {
-  player.resources[resource] += amount;
+  player.resourceCards[resource] += amount;
 }
 
 export function spendResources(
@@ -24,10 +24,10 @@ export function spendResources(
   cost: Partial<Record<Resource, number>>
 ): boolean {
   for (const [r, amt] of Object.entries(cost)) {
-    if (player.resources[r as Resource] < (amt || 0)) return false;
+    if (player.resourceCards[r as Resource] < (amt || 0)) return false;
   }
   Object.entries(cost).forEach(([r, amt]) => {
-    player.resources[r as Resource] -= amt!;
+    player.resourceCards[r as Resource] -= amt!;
   });
   return true;
 }
@@ -128,15 +128,15 @@ export function tradePlayers(
   }
   if (!spendResources(p2, trade.request)) {
     Object.entries(trade.offer).forEach(([r, amt]) => {
-      p1.resources[r as Resource] += amt!;
+      p1.resourceCards[r as Resource] += amt!;
     });
     return false;
   }
   Object.entries(trade.offer).forEach(([r, amt]) => {
-    p2.resources[r as Resource] += amt!;
+    p2.resourceCards[r as Resource] += amt!;
   });
   Object.entries(trade.request).forEach(([r, amt]) => {
-    p1.resources[r as Resource] += amt!;
+    p1.resourceCards[r as Resource] += amt!;
   });
   return true;
 }
