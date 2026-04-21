@@ -1,17 +1,20 @@
 // trading occurs when a player wants to exchange resources with another player or with the bank. This module will handle the logic for trading, including validating trades, calculating trade ratios, and updating player inventories.
-import { GameState, resourcesCards, Player, TradeState, TradeRequest, Trade, Result } from "@/utils/type";
+import { GameState, resourcesCard, trade } from "@/utils/type";
 import { checkSenderTradeRequest, checkReceiverTradeRequest } from "../gamerules/tradevalidation";
 import { UUID } from "crypto";
 
 export function addTradeToGameState(
   gameState: GameState,
-  tradeProposal: TradeRequest
+  sender: UUID,
+  receiver: UUID,
+  sendingCards: resourcesCard,
+  receivingCards: resourcesCard
 ): GameState {
-  const newTrade: Trade = {
-    sender: tradeProposal.sender,
-    receiver: tradeProposal.receiver,
-    receivingCards: tradeProposal.receivingCards,
-    sendingCards: tradeProposal.sendingCards,
+  const newTrade: trade = {
+    sender: sender,
+    receiver: receiver,
+    receivingCards: receivingCards,
+    sendingCards: sendingCards,
     isActive: true,
     canAccept: true,
     accepted: false,

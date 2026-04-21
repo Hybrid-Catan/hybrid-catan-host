@@ -19,21 +19,32 @@ export type dice = {
     sum: number;
 };
 
+export type resourceCard = {
+    "WOOD": number,
+    "BRICK": number,
+    "WOOL": number,
+    "WHEAT": number,
+    "ORE": number
+}
 
 export type trade = {
-    "player1": UUID,
-    "player2": UUID,
-    "Resources": {
-        "WOOD": number,
-        "BRICK": number,
-        "WOOL": number,
-        "WHEAT": number,
-        "ORE": number
-    },
+    "sender": UUID,
+    "receiver": UUID,
+    "receivingCards": resourceCard,
+    "sendingCards": resourceCard,
     "isActive": boolean,
-    canAccept: boolean,
-    "Accepted": boolean,
+    "canAccept": boolean,
+    "accepted": boolean
 }
+
+export type developmentCards = {
+    "KNIGHT": number,
+    "MONOPOLY": number,
+    "ROAD_BUILDING": number,
+    "INVENTION": number,
+    "VICTORY_POINT": number
+}
+
 
 export type color = "BLUE" | "RED" | "WHITE" | "ORANGE";
 
@@ -48,20 +59,9 @@ export type Player = {
     "name": string,
     "color": "BLUE" | "RED" | "WHITE" | "ORANGE",
     "victoryPoints": number,
-    "resources": {
-        "WOOD": number,
-        "BRICK": number,
-        "WOOL": number,
-        "WHEAT": number,
-        "ORE": number
-    },
-    "developmentCards": {
-        "KNIGHT": number,
-        "MONOPOLY": number,
-        "ROAD_BUILDING": number,
-        "INVENTION": number,
-        "VICTORY_POINT": number
-    },
+    "resourceCards": resourceCard,
+    "developmentCards": developmentCards,
+
     "pieces": {
         "settlementsPlaced": number,
         "citiesPlaced": number,
@@ -97,22 +97,8 @@ export type GameState = {
     },
 
     "bank": {
-        "resources": {
-            "WOOD": number,
-            "BRICK": number,
-            "WOOL": number,
-            "WHEAT": number,
-            "ORE": number
-        },
-        "developmentCardsRemaining": number
-    },
-
-    "developmentDeck": {
-        "KNIGHT": number,
-        "MONOPOLY": number,
-        "ROAD_BUILDING": number,
-        "INVENTION": number,
-        "VICTORY_POINT": number
+        "resourcesCard": resourceCard,
+        "developmentCard": number
     },
 
     "tradeState": {

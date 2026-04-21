@@ -1,8 +1,8 @@
-import { GameState, TradeRequest } from "../../../utils/type";
+import { GameState, trade } from "../../../utils/type";
 import { addTradeToGameState, cancelTrade, clearTrades, deleteTrade, fulfillTrade } from "../../../backend/gamelogic/trading/trading";
 import { checkReceiverTradeRequest, isTradeActive, checkSenderTradeRequest } from "@/backend/gamelogic/gamerules/tradevalidation";
 
-function addTradeRequest(gameState: GameState, tradeRequest: TradeRequest): GameState | Error {
+function addTradeRequest(gameState: GameState, tradeRequest: trade): GameState | Error {
     if (!checkSenderTradeRequest(tradeRequest, gameState)) {
         return new Error("Sender does not have enough resources.");
     }
@@ -31,7 +31,7 @@ function cancelTradeRequest(gameState: GameState, tradeIndex: number): GameState
     return cancelTrade(gameState, tradeIndex);
 }
 
-function counterTradeRequest(gameState: GameState, tradeIndex: number, newTradeRequest: TradeRequest): GameState | Error {
+function counterTradeRequest(gameState: GameState, tradeIndex: number, newTradeRequest: trade): GameState | Error {
     // if the reciever counter the trade, we update the trade with new sending and receiving cards, and mark it as active and accepted: false
     // we also need to check if the sender has enough resources to offer the counter trade
     if (!checkSenderTradeRequest(newTradeRequest, gameState)) {

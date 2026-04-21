@@ -1,5 +1,5 @@
 // app/api/trade/route.ts
-import { GameState, TradeRequest } from "@/utils/type";
+
 import { addTradeToGameState, cancelTrade, clearTrades, deleteTrade, fulfillTrade } from "@/backend/gamelogic/trading/trading";
 import { checkReceiverTradeRequest, isTradeActive, checkSenderTradeRequest } from "@/backend/gamelogic/gamerules/tradevalidation";
 import { NextRequest, NextResponse } from 'next/server';

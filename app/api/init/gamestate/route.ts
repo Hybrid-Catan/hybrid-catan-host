@@ -1,7 +1,7 @@
 import { GameState, color } from "../../../../utils/type";
 import { NextRequest, NextResponse } from "next/server";
 import { initGameState, initPlayer } from "@/backend/gamelogic/initilaisaiton/init";
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
     try {
         const gameState: GameState = initGameState();
         return NextResponse.json(
