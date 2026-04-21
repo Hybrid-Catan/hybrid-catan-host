@@ -59,9 +59,6 @@ export type Player = {
         "type": "WOOD" | "BRICK" | "WOOL" | "WHEAT" | "ORE" | "THREE_TO_ONE";
         "ratio": "2:1" | "3:1";
     }[];
-    "turnState": {
-        "currentPhase": "SETUP_1" | "SETUP_2" | "ROLL" | "TRADE" | "BUILD" | "END"
-    }
 }
 
 /**

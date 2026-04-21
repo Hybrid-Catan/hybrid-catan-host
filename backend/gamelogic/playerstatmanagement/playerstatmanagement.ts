@@ -9,12 +9,7 @@ import {
 
 type Resource = keyof Player["resources"];
 type DevCard = keyof Player["developmentCards"];
-type Phase = Player["turnState"]["currentPhase"];
 type Port = Player["portsOwned"][number];
-
-export function setPhase(player: Player, phase: Phase) {
-  player.turnState.currentPhase = phase;
-}
 
 export function addResource(
   player: Player,
@@ -198,20 +193,4 @@ export function updateLongestRoad(players: Player[]) {
 
 export function getVictoryPoints(player: Player): number {
   return calculateVictoryPoints(player);
-}
-
-export function startTurn(player: Player) {
-  setPhase(player, "ROLL");
-}
-
-export function moveToTrade(player: Player) {
-  setPhase(player, "TRADE");
-}
-
-export function moveToBuild(player: Player) {
-  setPhase(player, "BUILD");
-}
-
-export function endTurn(player: Player) {
-  setPhase(player, "END");
 }

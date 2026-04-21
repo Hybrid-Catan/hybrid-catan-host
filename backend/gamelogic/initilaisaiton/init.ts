@@ -36,18 +36,22 @@ export function createInitialGameState(): GameState {
   };
 }
 
-export function initPlayer(
+export function addPlayerToGame(
   id: string,
   name: string,
   color: Player["color"],
-  sequence: number
-): Player {
-  return {
+  sequence: number,
+  gameState: GameState
+): GameState {
+
+  const newPlayer: Player = {
     playerId: id as UUID,
     name,
     color,
     sequence,
+
     victoryPoints: 0,
+
     resources: {
       WOOD: 0,
       BRICK: 0,
@@ -55,6 +59,7 @@ export function initPlayer(
       WHEAT: 0,
       ORE: 0
     },
+
     developmentCards: {
       KNIGHT: 0,
       MONOPOLY: 0,
@@ -62,27 +67,39 @@ export function initPlayer(
       INVENTION: 0,
       VICTORY_POINT: 0
     },
+
     pieces: {
       settlementsPlaced: 0,
       citiesPlaced: 0,
       roadsPlaced: 0
     },
+
     achievements: {
       hasLongestRoad: false,
       longestRoadLength: 0,
       hasLargestArmy: false,
       armySize: 0
     },
-    portsOwned: [],
-    turnState: {
-      currentPhase: "SETUP_1"
-    }
-  };
-}
 
-export function initialisePlayers(game: GameState) {
-  game.players = [
-    initPlayer("1", "Alice", "BLUE", 1),
-    initPlayer("2", "Bob", "RED", 2)
-  ];
+    portsOwned: [],
+
+  };
+
+  const players = [...gameState.players];
+
+  // Find correct insertion index (keep list sorted by sequence)
+  let insertIndex = players.findIndex(p => p.sequence > sequence);
+
+  if (insertIndex === -1) {
+    // new player has highest sequence → push to end
+    players.push(newPlayer);
+  } else {
+    // insert at correct position
+    players.splice(insertIndex, 0, newPlayer);
+  }
+
+  return {
+    ...gameState,
+    players
+  };
 }
