@@ -94,7 +94,7 @@ export type GameState = {
     },
     "bank": {
         "resourceCards": resourceCards,
-        "developmentCard": number
+        "developmentCards": developmentCards,
     },
     "tradeState": {
         trades: trade[];

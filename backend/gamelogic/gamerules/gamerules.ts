@@ -153,13 +153,13 @@ export function hasPiecesRemaining(player: Player, action: "SETTLEMENT" | "CITY"
  */
 export function bankCanDistribute(
     gameState: GameState,
-    resource: keyof GameState["bank"]["resourcesCard"],
+    resource: keyof GameState["bank"]["resourceCards"],
     amount: number
 ): RuleResult {
-    if (gameState.bank.resourcesCard[resource] < amount) {
+    if (gameState.bank.resourceCards[resource] < amount) {
         return {
             valid: false,
-            reason: `Bank has insufficient ${resource}: need ${amount}, has ${gameState.bank.resourcesCard[resource]}`,
+            reason: `Bank has insufficient ${resource}: need ${amount}, has ${gameState.bank.resourceCards[resource]}`,
         };
     }
     return { valid: true };
@@ -172,9 +172,13 @@ export function bankCanDistribute(
  * @returns RuleResult — valid if cards remain, invalid if the deck is empty
  */
 export function bankHasDevCards(gameState: GameState): RuleResult {
-    if (gameState.bank.developmentCard <= 0) {
+    const total = Object.values(gameState.bank.developmentCards)
+        .reduce((sum, count) => sum + count, 0);
+
+    if (total <= 0) {
         return { valid: false, reason: "No development cards remaining in bank" };
     }
+
     return { valid: true };
 }
 
