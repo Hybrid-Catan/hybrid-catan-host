@@ -1,9 +1,18 @@
-import { GameState, color, } from "../../../../utils/type";
+import { GameState, color } from "../../../../utils/type";
+import { NextRequest, NextResponse } from "next/server";
+import { initGameState, initPlayer } from "@/backend/gamelogic/initilaisaiton/init";
+export async function POST(req: NextRequest): Promise<NextResponse> {
+    try {
+        const gameState: GameState = initGameState();
+        return NextResponse.json(
+            { success: true, data: gameState },
+            { status: 200 }
+        );
 
-
-
-
-function initPlayerRequest(gameState: GameState, color: color, sequence: number, name: string): GameState {
-    // initPlayer(gameState: GameState, color: color, sequence: number, name: string): GameState
-    return gameState;
+    } catch (error) {
+        return NextResponse.json(
+            { success: false, error: "Internal server error" },
+            { status: 500 }
+        );
+    }
 }

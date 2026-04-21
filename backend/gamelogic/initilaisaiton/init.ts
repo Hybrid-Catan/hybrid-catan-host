@@ -1,7 +1,7 @@
 import { UUID } from "crypto";
 import type { GameState, Player } from "../../../utils/type.ts";
 
-export function createInitialGameState(): GameState {
+export function initGameState(): GameState {
   return {
     gameId: "test-game",
     status: "SETUP",
@@ -28,24 +28,25 @@ export function createInitialGameState(): GameState {
       VICTORY_POINT: 5
     },
     tradeState: {
-      Trades: []
+      trades: []
     },
     winner: {
-      playerId: "" as any
+      playerId:""
     }
   };
 }
 
-export function addPlayerToGame(
-  id: string,
+export function initPlayer(
   name: string,
   color: Player["color"],
   sequence: number,
   gameState: GameState
 ): GameState {
 
+  const id = crypto.randomUUID() as UUID;
+
   const newPlayer: Player = {
-    playerId: id as UUID,
+    playerId: id,
     name,
     color,
     sequence,
@@ -82,19 +83,15 @@ export function addPlayerToGame(
     },
 
     portsOwned: [],
-
   };
 
   const players = [...gameState.players];
 
-  // Find correct insertion index (keep list sorted by sequence)
-  let insertIndex = players.findIndex(p => p.sequence > sequence);
+  const insertIndex = players.findIndex(p => p.sequence > sequence);
 
   if (insertIndex === -1) {
-    // new player has highest sequence → push to end
     players.push(newPlayer);
   } else {
-    // insert at correct position
     players.splice(insertIndex, 0, newPlayer);
   }
 
@@ -103,3 +100,4 @@ export function addPlayerToGame(
     players
   };
 }
+

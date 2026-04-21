@@ -17,7 +17,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             );
         }
 
-        const newGameState: GameState = initPlayer(color, sequence, name, gameState);
+        const newGameState: GameState = initPlayer( name, color, sequence,gameState);
 
         return NextResponse.json(
             { success: true, data: newGameState },
