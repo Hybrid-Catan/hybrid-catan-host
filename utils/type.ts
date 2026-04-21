@@ -45,7 +45,6 @@ export type developmentCards = {
     "VICTORY_POINT": number
 }
 
-
 export type color = "BLUE" | "RED" | "WHITE" | "ORANGE";
 
 /**
@@ -61,7 +60,6 @@ export type Player = {
     "victoryPoints": number,
     "resourceCards": resourceCard,
     "developmentCards": developmentCards,
-
     "pieces": {
         "settlementsPlaced": number,
         "citiesPlaced": number,
@@ -91,20 +89,16 @@ export type GameState = {
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
     "players": Player[],// in queue
     "phase": "SETUP_1" | "SETUP_2" | "ROLL" | "TRADE" | "BUILD" | "END",
-
     "dice": {
         "sum": number
     },
-
     "bank": {
         "resourcesCard": resourceCard,
         "developmentCard": number
     },
-
     "tradeState": {
         trades: trade[];
     },
-
     "winner": {
         "playerId": UUID,
     }
