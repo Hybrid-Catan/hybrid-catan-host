@@ -97,7 +97,7 @@ export type GameState = {
     },
 
     "bank": {
-        "resourcesCard": resourceCards,
+        "resourceCards": resourceCards,
         "developmentCard": number
     },
 
