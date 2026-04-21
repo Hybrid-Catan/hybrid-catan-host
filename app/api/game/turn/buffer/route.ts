@@ -1,10 +1,9 @@
-import { GameState, color } from "../../../utils/type";
 import { NextRequest, NextResponse } from "next/server";
-import { startGame } from "@/backend/gamelogic/gameflow/gameflow";
+import { setPhaseToBuffer } from "@/backend/gamelogic/turnmanagement/turnmanagment";
 export async function GET(req: NextRequest): Promise<NextResponse> {
     try {
         const {gameState} = await req.json();
-        const newGameState = startGame(gameState);
+        const newGameState = setPhaseToBuffer(gameState);
         return NextResponse.json(
             { success: true, data: newGameState },
             { status: 200 }

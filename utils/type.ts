@@ -88,7 +88,7 @@ export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
     "players": Player[],// in queue
-    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "TRADE" | "BUILD" | "END",
+    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD",
     "dice": {
         "sum": number
     },
