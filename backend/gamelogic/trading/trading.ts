@@ -1,5 +1,5 @@
 // trading occurs when a player wants to exchange resources with another player or with the bank. This module will handle the logic for trading, including validating trades, calculating trade ratios, and updating player inventories.
-import { GameState, resourcesCard, trade } from "@/utils/type";
+import { GameState, resourceCards, trade } from "@/utils/type";
 import { checkSenderTradeRequest, checkReceiverTradeRequest } from "../gamerules/tradevalidation";
 import { UUID } from "crypto";
 
@@ -7,8 +7,8 @@ export function addTradeToGameState(
   gameState: GameState,
   sender: UUID,
   receiver: UUID,
-  sendingCards: resourcesCard,
-  receivingCards: resourcesCard
+  sendingCards: resourceCards,
+  receivingCards: resourceCards
 ): GameState {
   const newTrade: trade = {
     sender: sender,
@@ -52,7 +52,7 @@ export function fulfillTrade(
   const sender = gameState.players[senderIndex];
   const receiver = gameState.players[receiverIndex];
 
-  const update = (res: resourcesCards, delta: resourcesCards, give: boolean): resourcesCards => ({
+  const update = (res: resourceCards, delta: resourceCards, give: boolean): resourceCards => ({
     WOOD: res.WOOD + (give ? -delta.WOOD : delta.WOOD),
     BRICK: res.BRICK + (give ? -delta.BRICK : delta.BRICK),
     WOOL: res.WOOL + (give ? -delta.WOOL : delta.WOOL),
@@ -64,14 +64,14 @@ export function fulfillTrade(
     if (p.playerId === sender.playerId) {
       return {
         ...p,
-        resourcesCards: update(p.resourcesCards, trade.sendingCards, true),
+        resourceCards: update(p.resourceCards, trade.sendingCards, true),
       };
     }
 
     if (p.playerId === receiver.playerId) {
       return {
         ...p,
-        resourcesCards: update(p.resourcesCards, trade.receivingCards, true),
+        resourceCards: update(p.resourceCards, trade.receivingCards, true),
       };
     }
 
