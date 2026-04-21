@@ -43,6 +43,12 @@ export function initPlayer(
   gameState: GameState
 ): GameState {
 
+  const colorTaken = gameState.players.some(p => p.color === color);
+
+  if (colorTaken) {
+    throw new Error(`Color ${color} is already taken, choose another.`);
+  }
+
   const id = crypto.randomUUID() as UUID;
 
   const newPlayer: Player = {
