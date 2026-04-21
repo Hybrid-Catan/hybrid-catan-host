@@ -19,7 +19,7 @@ export type dice = {
     sum: number;
 };
 
-export type resourceCard = {
+export type resourceCards = {
     "WOOD": number,
     "BRICK": number,
     "WOOL": number,
@@ -30,8 +30,8 @@ export type resourceCard = {
 export type trade = {
     "sender": UUID,
     "receiver": UUID,
-    "receivingCards": resourceCard,
-    "sendingCards": resourceCard,
+    "receivingCards": resourceCards,
+    "sendingCards": resourceCards,
     "isActive": boolean,
     "canAccept": boolean,
     "accepted": boolean
@@ -59,7 +59,7 @@ export type Player = {
     "name": string,
     "color": "BLUE" | "RED" | "WHITE" | "ORANGE",
     "victoryPoints": number,
-    "resourceCards": resourceCard,
+    "resourceCards": resourceCards,
     "developmentCards": developmentCards,
 
     "pieces": {
@@ -97,7 +97,7 @@ export type GameState = {
     },
 
     "bank": {
-        "resourcesCard": resourceCard,
+        "resourcesCard": resourceCards,
         "developmentCard": number
     },
 
