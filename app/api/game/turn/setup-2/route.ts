@@ -1,4 +1,3 @@
-import { GameState, color } from "@/utils/type";
 import { NextRequest, NextResponse } from "next/server";
 import { setPhaseToSetup2 } from "@/backend/gamelogic/turnmanagement/turnmanagment";
 export async function GET(req: NextRequest): Promise<NextResponse> {
