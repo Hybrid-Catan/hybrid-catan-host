@@ -7,13 +7,13 @@ export function getTurnPlayerId(gameState: GameState): UUID {
 }
 
 export function setPhaseToSetup1(gameState: GameState) {
-    gameState.status = "IN_PROGRESS";
+    gameState.status = "SETUP";
     gameState.phase = "SETUP_1";
-
     return gameState;
 }
 
 export function setPhaseToSetup2(gameState: GameState): GameState {
+    gameState.status = "SETUP";
     return {
         ...gameState,
         phase: "SETUP_2",
@@ -21,6 +21,7 @@ export function setPhaseToSetup2(gameState: GameState): GameState {
 }
 
 export function setPhaseToRoll(gameState: GameState): GameState {
+    gameState.status = "IN_PROGRESS";
     return {
         ...gameState,
         phase: "ROLL",
@@ -28,6 +29,7 @@ export function setPhaseToRoll(gameState: GameState): GameState {
 }
 
 export function setPhaseToBuffer(gameState: GameState): GameState {
+    gameState.status = "IN_PROGRESS";
     return {
         ...gameState,
         phase: "BUFFER",
@@ -35,6 +37,7 @@ export function setPhaseToBuffer(gameState: GameState): GameState {
 }
 
 export function setPhaseToTrade(gameState: GameState): GameState {
+    gameState.status = "IN_PROGRESS";
     return {
         ...gameState,
         phase: "TRADE",
@@ -42,6 +45,7 @@ export function setPhaseToTrade(gameState: GameState): GameState {
 }
 
 export function setPhaseToBuild(gameState: GameState): GameState {
+    gameState.status = "IN_PROGRESS";
     return {
         ...gameState,
         phase: "BUILD",

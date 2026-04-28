@@ -107,3 +107,6 @@ export type GameState = {
         "playerId": UUID,
     }
 }
+export type PlayerToResourceMap = {
+    [playerId: string]: resourceCards;
+}

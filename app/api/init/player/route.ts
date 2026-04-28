@@ -17,8 +17,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             );
         }
 
-        const newGameState: GameState = initPlayer( name, color, sequence,gameState);
-
+        const newGameState: GameState = initPlayer(name, color, sequence, gameState);
+        console.log("New GameState after adding player:", newGameState);
         return NextResponse.json(
             { success: true, data: newGameState },
             { status: 200 }
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     } catch (error) {
         return NextResponse.json(
-            { success: false, error: "Internal server error" },
+            { success: false, error: "Internal server error + " + error },
             { status: 500 }
         );
     }

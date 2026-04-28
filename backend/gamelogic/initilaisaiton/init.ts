@@ -26,6 +26,9 @@ export function initGameState(): GameState {
         VICTORY_POINT: 5
       }
     },
+    robber: {
+      tileIndex: -1
+    },
     tradeState: {
       trades: []
     },
@@ -41,14 +44,13 @@ export function initPlayer(
   sequence: number,
   gameState: GameState
 ): GameState {
-  const colorTaken = gameState.players.some(p => p.color === color);
+  console.log("New GameState after adding player:");
 
-  if (colorTaken) {
-    throw new Error(`Color ${color} is already taken, choose another.`);
-  }
+  console.log("New GameState after adding player:");
+
 
   const id = crypto.randomUUID() as UUID;
-
+  console.log("New GameState after adding player:");
   const newPlayer: Player = {
     playerId: id,
     name,
@@ -93,11 +95,13 @@ export function initPlayer(
 
   const insertIndex = players.findIndex(p => p.sequence > sequence);
 
+
   if (insertIndex === -1) {
     players.push(newPlayer);
   } else {
     players.splice(insertIndex, 0, newPlayer);
   }
+
 
   return {
     ...gameState,
