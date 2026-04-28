@@ -6,8 +6,7 @@ export function getTurnPlayerId(gameState: GameState): UUID {
     return gameState.players[0].playerId;
 }
 
-export function setPhaseToSetup1(gameState:GameState)
-{
+export function setPhaseToSetup1(gameState: GameState) {
     gameState.status = "IN_PROGRESS";
     gameState.phase = "SETUP_1";
 
@@ -48,4 +47,17 @@ export function setPhaseToBuild(gameState: GameState): GameState {
         phase: "BUILD",
     };
 }
+
+export function setNextPlayer(gameState: GameState): { newGameState: GameState } {
+    const playersQueue = [...gameState.players];
+    const currentPlayer = playersQueue.shift()!;
+    playersQueue.push(currentPlayer);
+
+    const newGameState: GameState = {
+        ...gameState,
+        players: playersQueue,
+    };
+    return { newGameState };
+}
+
 
