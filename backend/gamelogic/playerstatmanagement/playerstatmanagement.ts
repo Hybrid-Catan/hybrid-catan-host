@@ -55,6 +55,29 @@ const DEV_COST = {
   ORE: 1,
 };
 
+export function distributeResource(
+  gameState: GameState,
+  resourceMap: Record<string, Partial<Record<Resource, number>>>
+): GameState {
+  const newPlayers = gameState.players.map((player) => {
+    const playerResources = resourceMap[player.playerId];
+    if (!playerResources) return player;
+    const updatedResourceCards = { ...player.resourceCards };
+    for (const resource in playerResources) {
+      const amount = playerResources[resource as Resource] || 0;
+      updatedResourceCards[resource as Resource] += amount;
+    }
+    return {
+      ...player,
+      resourceCards: updatedResourceCards,
+    };
+  });
+  return {
+    ...gameState,
+    players: newPlayers,
+  };
+}
+
 export function addResource(
   gameState: GameState,
   resource: Resource,
