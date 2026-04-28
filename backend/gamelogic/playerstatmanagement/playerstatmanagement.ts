@@ -26,11 +26,9 @@ function spendResources(
       return false;
     }
   }
-
   for (const [r, amt] of Object.entries(cost)) {
     player.resourceCards[r as Resource] -= amt!;
   }
-
   return true;
 }
 
