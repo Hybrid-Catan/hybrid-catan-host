@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setPhaseToRoll } from "@/backend/gamelogic/turnmanagement/turnmanagment";
+import { setPhaseToBuild } from "@/backend/gamelogic/turnmanagement/turnmanagment";
 export async function GET(req: NextRequest): Promise<NextResponse> {
     try {
         const {gameState} = await req.json();
-        const newGameState = setPhaseToRoll(gameState);
+        const newGameState = setPhaseToBuild(gameState);
         return NextResponse.json(
             { success: true, data: newGameState },
             { status: 200 }
