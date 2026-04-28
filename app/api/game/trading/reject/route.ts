@@ -1,5 +1,5 @@
-import { GameState, trade } from "../../../utils/type";
-import { addTradeToGameState, cancelTrade, clearTrades, deleteTrade, fulfillTrade } from "../../../backend/gamelogic/trading/trading";
+import { GameState, trade } from "../../../../../utils/type";
+import { addTradeToGameState, cancelTrade, clearTrades, deleteTrade, fulfillTrade } from "../../../../../backend/gamelogic/trading/trading";
 import { checkReceiverTradeRequest, isTradeActive, checkSenderTradeRequest } from "@/backend/gamelogic/gamerules/tradevalidation";
 
 function addTradeRequest(gameState: GameState, tradeRequest: trade): GameState | Error {

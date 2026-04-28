@@ -93,6 +93,9 @@ export type GameState = {
     "dice": {
         "sum": number
     },
+    robber: {
+        tileIndex: number;
+    },
     "bank": {
         "resourceCards": resourceCards,
         "developmentCards": developmentCards,
