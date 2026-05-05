@@ -17,6 +17,7 @@ export function setPhaseToSetup2(gameState: GameState): GameState {
     return {
         ...gameState,
         phase: "SETUP_2",
+        players: [...gameState.players].reverse(),
     };
 }
 
@@ -63,5 +64,3 @@ export function setNextPlayer(gameState: GameState): { newGameState: GameState }
     };
     return { newGameState };
 }
-
-
