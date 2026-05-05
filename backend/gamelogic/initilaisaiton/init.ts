@@ -6,7 +6,7 @@ export function initGameState(): GameState {
     gameId: "test-game",
     status: "SETUP",
     players: [],
-    phase: "INIT",
+    phase: "SETUP_1",
     dice: {
       sum: 0
     },
@@ -101,7 +101,6 @@ export function initPlayer(
   } else {
     players.splice(insertIndex, 0, newPlayer);
   }
-
 
   return {
     ...gameState,

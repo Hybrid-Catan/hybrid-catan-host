@@ -10,7 +10,18 @@ const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
 
 app.prepare().then(() => {
-    const httpServer = createServer(handler);
+    const httpServer = createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "http://localhost:3001");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") {
+        res.writeHead(200);
+        res.end();
+        return;
+    }
+
+    handler(req, res);
+    });
     const peers = new Set<WebSocket>();
 
     // No { server: httpServer } — we handle upgrades manually
