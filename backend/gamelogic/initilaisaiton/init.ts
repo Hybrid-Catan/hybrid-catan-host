@@ -6,7 +6,7 @@ export function initGameState(): GameState {
     gameId: "test-game",
     status: "SETUP",
     players: [],
-    phase: "SETUP_1",
+    phase: "INIT",
     dice: {
       sum: 0
     },
