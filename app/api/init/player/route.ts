@@ -10,7 +10,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             gameState: GameState;
         } = await req.json();
 
-        if (!color || !sequence || !name || !gameState) {
+        if (!color || sequence === undefined || sequence === null || !name || !gameState) {
             return NextResponse.json(
                 { success: false, error: "Missing required fields" },
                 { status: 400 }

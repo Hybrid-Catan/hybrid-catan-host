@@ -56,7 +56,6 @@ export function initPlayer(
     name,
     color,
     sequence,
-
     victoryPoints: 0,
 
     resourceCards: {
