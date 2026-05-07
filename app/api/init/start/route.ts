@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { games } from "@/app/lib/games";
 
 export async function POST(req: NextRequest) {
   const { gameState } = await req.json();
@@ -12,6 +13,8 @@ export async function POST(req: NextRequest) {
     phase: "SETUP_1",
     status: "IN_PROGRESS"
   };
+
+  games.set(newState.gameId, newState);
 
   return NextResponse.json({ success: true, data: newState });
 }
