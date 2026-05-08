@@ -8,15 +8,12 @@ export async function POST(req: NextRequest) {
 
   if (!gameState) {
     return NextResponse.json(
-      {
-        success: false,
-        error: "Game not found",
-      },
-      {
-        status: 404,
-      }
+      { success: false, error: "Game not found" },
+      { status: 404 }
     );
   }
+
+  console.dir(games, { depth: null })
 
   return NextResponse.json({
     success: true,
