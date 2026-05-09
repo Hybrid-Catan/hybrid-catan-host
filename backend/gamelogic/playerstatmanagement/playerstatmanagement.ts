@@ -6,7 +6,7 @@ import {
   canBuyDevCard,
   calculateVictoryPoints
 } from "../gamerules/gamerules.ts";
-import { getTurnPlayerId } from "../turnmanagement/turnmanagment.ts";
+import { getTurnPlayerId } from "../turnmanagement/turnmanagement.ts";
 
 type Resource = keyof Player["resourceCards"];
 type DevCard = keyof Player["developmentCards"];

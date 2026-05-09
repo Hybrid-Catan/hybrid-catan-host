@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setNextPlayer, setPhaseToRoll } from "@/backend/gamelogic/turnmanagement/turnmanagment";
+import { setNextPlayer, setPhaseToRoll } from "@/backend/gamelogic/turnmanagement/turnmanagement";
 export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
         //1. Turn the state to roll phase
