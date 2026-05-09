@@ -82,13 +82,13 @@ export function canAfford(player: Player, action: BuildAction): RuleResult {
     // Loop through each resource and its required amount
     // e.g. resource = "WOOD", amount = 1
     for (const [resource, amount] of Object.entries(cost)) {
-        const key = resource as keyof typeof player.resources;
+        const key = resource as keyof typeof player.resourceCards;
 
         // If the player doesn't have enough of this resource, return invalid immediately
-        if (player.resources[key] < amount) {
+        if (player.resourceCards[key] < amount) {
             return {
                 valid: false,
-                reason: `Insufficient ${resource}: need ${amount}, have ${player.resources[key]}`,
+                reason: `Insufficient ${resource}: need ${amount}, have ${player.resourceCards[key]}`,
             };
         }
     }
@@ -153,13 +153,13 @@ export function hasPiecesRemaining(player: Player, action: "SETTLEMENT" | "CITY"
  */
 export function bankCanDistribute(
     gameState: GameState,
-    resource: keyof GameState["bank"]["resources"],
+    resource: keyof GameState["bank"]["resourceCards"],
     amount: number
 ): RuleResult {
-    if (gameState.bank.resources[resource] < amount) {
+    if (gameState.bank.resourceCards[resource] < amount) {
         return {
             valid: false,
-            reason: `Bank has insufficient ${resource}: need ${amount}, has ${gameState.bank.resources[resource]}`,
+            reason: `Bank has insufficient ${resource}: need ${amount}, has ${gameState.bank.resourceCards[resource]}`,
         };
     }
     return { valid: true };
@@ -172,9 +172,13 @@ export function bankCanDistribute(
  * @returns RuleResult — valid if cards remain, invalid if the deck is empty
  */
 export function bankHasDevCards(gameState: GameState): RuleResult {
-    if (gameState.bank.developmentCardsRemaining <= 0) {
+    const total = Object.values(gameState.bank.developmentCards)
+        .reduce((sum, count) => sum + count, 0);
+
+    if (total <= 0) {
         return { valid: false, reason: "No development cards remaining in bank" };
     }
+
     return { valid: true };
 }
 
@@ -267,7 +271,7 @@ export function canBuyDevCard(player: Player, gameState: GameState): RuleResult 
  * @returns RuleResult — valid if the target has resources, invalid if their hand is empty
  */
 export function canStealFrom(target: Player): RuleResult {
-    const totalResources = Object.values(target.resources).reduce((sum, amount) => sum + amount, 0);
+    const totalResources = Object.values(target.resourceCards).reduce((sum, amount) => sum + amount, 0);
     if (totalResources === 0) {
         return { valid: false, reason: `${target.name} has no resources to steal` };
     }
