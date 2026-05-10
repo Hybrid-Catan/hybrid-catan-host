@@ -69,9 +69,13 @@ const InfoRow = ({ icon, label, value, accent = "amber" }: { icon: string; label
   </div>
 );
 
-interface LogEntry { ts: string; msg: string; type: "info" | "success" | "warn" | "error"; }
+interface LogEntry { ts: string; msg: string; type: "info" | "success" | "warn" | "error" | "cv"; }
 const LOG_COLORS: Record<LogEntry["type"], string> = {
-  info: "text-[#6B7A99]", success: "text-emerald-400", warn: "text-yellow-400", error: "text-red-400",
+  info: "text-[#6B7A99]",
+  success: "text-emerald-400",
+  warn: "text-yellow-400",
+  error: "text-red-400",
+  cv: "text-purple-400",
 };
 
 function now() {
@@ -94,19 +98,220 @@ export default function Host() {
   const socketRef = useRef<WebSocket | null>(null);
   const gameIdRef = useRef<string | null>(null);
   const playersRef = useRef<Map<number, PlayerState>>(new Map());
-  const localStreamRef = useRef<MediaStream | null>(null);
+  const rawStreamRef = useRef<MediaStream | null>(null);
+  const cvStreamRef = useRef<MediaStream | null>(null);
 
   const [status, setStatus] = useState<StatusType>("idle");
   const [logs, setLogs] = useState<LogEntry[]>([{ ts: now(), msg: "System ready — press Connect to start.", type: "info" }]);
   const [players, setPlayers] = useState(0);
   const [gameId, setGameId] = useState<string | null>(null);
 
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cvSocketRef = useRef<WebSocket | null>(null);
+  const frameLoopRef = useRef<number | null>(null);
+  const [cvStatus, setCvStatus] = useState<"idle" | "processing" | "no_board" | "error">("idle");
+
+  // Track whether the next WS message from CV server is a JPEG (false) or JSON (true)
+  const cvExpectJsonRef = useRef(false);
+  // FIX: throttle CV log entries to avoid flooding React state updates
+  const lastCvLogRef = useRef(0);
+
   function addLog(msg: string, type: LogEntry["type"] = "info") {
-    setLogs(l => [{ ts: now(), msg, type }, ...l].slice(0, 40));
+    setLogs(l => [{ ts: now(), msg, type }, ...l].slice(0, 80));
   }
 
-  // ── Shared WebSocket + PeerConnection setup ──────────────────────────────
-  function setupSocket(id: string, stream: MediaStream) {
+  // ── Summarise the board state JSON into human-readable log lines ──────────
+  function logCvState(state: Record<string, unknown>) {
+    // FIX: only log CV board state at most every 5 seconds to prevent
+    // flooding React with dozens of setState calls per second
+    const now_ms = Date.now();
+    if (now_ms - lastCvLogRef.current < 5000) return;
+    lastCvLogRef.current = now_ms;
+
+    try {
+      const tiles = (state.tile_results as Array<Record<string, unknown>>) ?? [];
+      const ports = (state.port_results as Array<Record<string, unknown>>) ?? [];
+      const robber = state.robber_tile_index;
+      const vertices = (state.vertex_colors as Array<Record<string, unknown>>) ?? [];
+      const edges = (state.edge_colors as Array<Record<string, unknown>>) ?? [];
+
+      // Tile summary: count by resource
+      const tileCount: Record<string, number> = {};
+      for (const t of tiles) {
+        const r = (t.resource as string) ?? "?";
+        tileCount[r] = (tileCount[r] ?? 0) + 1;
+      }
+      const tileSummary = Object.entries(tileCount)
+        .map(([k, v]) => `${k}×${v}`)
+        .join("  ");
+
+      // Occupied vertices / edges
+      const occupiedVerts = vertices.filter(v => v.color != null);
+      const occupiedEdges = edges.filter(e => e.color != null);
+
+      // Port summary
+      const portSummary = ports.length
+        ? ports.map(p => p.resource ?? p.label).join("  ")
+        : "none detected";
+
+      addLog(`[CV] Tiles (${tiles.length}): ${tileSummary || "—"}`, "cv");
+      addLog(`[CV] Ports (${ports.length}): ${portSummary}`, "cv");
+      addLog(`[CV] Robber → tile ${robber ?? "unknown"}`, "cv");
+      addLog(
+        `[CV] Pieces — ${occupiedVerts.length} vertex / ${occupiedEdges.length} edge occupied`,
+        "cv"
+      );
+
+      // Per-color breakdown of occupied vertices
+      const colorVerts: Record<string, number> = {};
+      for (const v of occupiedVerts) {
+        const c = (v.color as string) ?? "?";
+        colorVerts[c] = (colorVerts[c] ?? 0) + 1;
+      }
+      if (Object.keys(colorVerts).length) {
+        addLog(
+          `[CV] Settlements/cities — ${Object.entries(colorVerts).map(([c, n]) => `${c}:${n}`).join("  ")}`,
+          "cv"
+        );
+      }
+
+      // Per-color breakdown of occupied edges
+      const colorEdges: Record<string, number> = {};
+      for (const e of occupiedEdges) {
+        const c = (e.color as string) ?? "?";
+        colorEdges[c] = (colorEdges[c] ?? 0) + 1;
+      }
+      if (Object.keys(colorEdges).length) {
+        addLog(
+          `[CV] Roads — ${Object.entries(colorEdges).map(([c, n]) => `${c}:${n}`).join("  ")}`,
+          "cv"
+        );
+      }
+    } catch (err) {
+      addLog(`[CV] Failed to parse board state: ${err}`, "error");
+    }
+  }
+
+  // ── CV loop ────────────────────────────────────────────────────────────────
+  function startCVLoop(rawStream: MediaStream, cvWsUrl: string): MediaStream | null {
+    const offscreen = document.createElement("canvas");
+    offscreen.width = 1280;
+    offscreen.height = 720;
+    const ctx = offscreen.getContext("2d")!;
+
+    const vid = document.getElementById("localVideo") as HTMLVideoElement;
+    if (!vid) { addLog("Hidden video element not found.", "error"); return null; }
+    vid.srcObject = rawStream;
+    const debugVid = document.getElementById("debugVideo") as HTMLVideoElement;
+    if (debugVid) debugVid.srcObject = rawStream;
+
+    const cvSocket = new WebSocket(cvWsUrl);
+    cvSocket.binaryType = "arraybuffer";
+    cvSocketRef.current = cvSocket;
+    cvExpectJsonRef.current = false;
+
+    let waiting = false;
+    let waitingSince = 0;
+
+    cvSocket.onopen = () => {
+      addLog("CV WebSocket connected.", "success");
+      setCvStatus("processing");
+    };
+
+    cvSocket.onmessage = (e) => {
+      // The Python server sends two messages per frame:
+      //   1st → JPEG bytes (ArrayBuffer)
+      //   2nd → JSON board state (ArrayBuffer containing UTF-8 text)
+      // We toggle cvExpectJsonRef between frames.
+
+      if (!cvExpectJsonRef.current) {
+        // ── Message 1: JPEG ────────────────────────────────────────────────
+        waiting = false;
+        cvExpectJsonRef.current = true;
+
+        if (e.data instanceof ArrayBuffer) {
+          const blob = new Blob([e.data], { type: "image/jpeg" });
+          const url = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const c = canvas.getContext("2d")!;
+            c.drawImage(img, 0, 0, canvas.width, canvas.height);
+            URL.revokeObjectURL(url);
+          };
+          img.src = url;
+          setCvStatus("processing");
+        }
+      } else {
+        // ── Message 2: JSON board state ────────────────────────────────────
+        cvExpectJsonRef.current = false;
+
+        try {
+          const text = typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data);
+          const state = JSON.parse(text);
+          if (state.error === "no_board") {
+            setCvStatus("no_board");
+          } else if (state.error) {
+            setCvStatus("error");
+          } else {
+            logCvState(state);
+            setCvStatus("processing");
+          }
+        } catch {
+          // Don't let a bad JSON message permanently break the toggle
+          addLog("[CV] JSON decode failed — continuing.", "warn");
+        }
+      }
+    };
+
+    cvSocket.onerror = () => { addLog("CV WebSocket error.", "error"); setCvStatus("error"); };
+    cvSocket.onclose = () => { addLog("CV WebSocket closed.", "warn"); };
+
+    frameLoopRef.current = window.setInterval(() => {
+      // Unstick if server went quiet for >3s
+      if (waiting && Date.now() - waitingSince > 3000) {
+        addLog("[CV] Frame timeout — resetting.", "warn");
+        waiting = false;
+        cvExpectJsonRef.current = false;
+      }
+      if (waiting || cvSocket.readyState !== WebSocket.OPEN) return;
+      if (!vid.videoWidth) return;
+      offscreen.width = vid.videoWidth;
+      offscreen.height = vid.videoHeight;
+      ctx.drawImage(vid, 0, 0);
+      offscreen.toBlob((blob) => {
+        if (!blob) return;
+        blob.arrayBuffer().then((buf) => {
+          // FIX: re-check `waiting` inside the async callback to prevent a
+          // race where two sends go out back-to-back if the previous response
+          // arrived while the blob was still encoding
+          if (cvSocket.readyState === WebSocket.OPEN && !waiting) {
+            cvSocket.send(buf);
+            waiting = true;
+            waitingSince = Date.now();
+          }
+        });
+      }, "image/jpeg", 0.85);
+    }, 100);
+
+    const canvas = canvasRef.current;
+    if (!canvas) { addLog("Output canvas not found — cannot capture stream.", "error"); return null; }
+    const capturedStream = canvas.captureStream(15);
+    addLog("CV canvas stream captured (15 FPS) — players will see processed output.", "success");
+    return capturedStream;
+  }
+
+  function stopCVLoop() {
+    if (frameLoopRef.current) { clearInterval(frameLoopRef.current); frameLoopRef.current = null; }
+    cvSocketRef.current?.close();
+    cvSocketRef.current = null;
+    cvExpectJsonRef.current = false;
+    setCvStatus("idle");
+  }
+
+  // ── Signaling + PeerConnection setup ────────────────────────────────────────
+  function setupSocket(id: string, streamToShare: MediaStream) {
     const wsUrl = process.env.NEXT_PUBLIC_HOST_WS!;
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
@@ -127,14 +332,14 @@ export default function Host() {
         setPlayers(p => p + 1);
         addLog(`Player ${pidx} detected — initiating handshake…`, "success");
 
-        const localStream = localStreamRef.current;
-        if (!localStream) { addLog("No local stream — cannot create offer.", "error"); return; }
+        const stream = cvStreamRef.current;
+        if (!stream) { addLog("No CV stream available — cannot create offer.", "error"); return; }
 
         const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
         const playerState: PlayerState = { pc, remoteDescSet: false, iceCandidateBuffer: [] };
         playersRef.current.set(pidx, playerState);
 
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
         pc.onicecandidate = (e) => {
           if (e.candidate && socket.readyState === WebSocket.OPEN) {
@@ -145,7 +350,8 @@ export default function Host() {
         pc.oniceconnectionstatechange = () => {
           const state = pc.iceConnectionState;
           addLog(`ICE [player ${pidx}] → ${state}`,
-            state === "connected" || state === "completed" ? "success" : state === "failed" ? "error" : "info");
+            state === "connected" || state === "completed" ? "success"
+              : state === "failed" ? "error" : "info");
           if (state === "failed") pc.restartIce();
         };
 
@@ -178,7 +384,8 @@ export default function Host() {
         if (!ps.remoteDescSet) {
           ps.iceCandidateBuffer.push(data.candidate);
         } else {
-          await ps.pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => console.error("ICE candidate error", e));
+          await ps.pc.addIceCandidate(new RTCIceCandidate(data.candidate))
+            .catch(e => console.error("ICE candidate error", e));
         }
       }
     };
@@ -187,35 +394,45 @@ export default function Host() {
     socket.onclose = () => { addLog("Signaling socket closed.", "warn"); };
   }
 
-  // ── Initial connect ──────────────────────────────────────────────────────
+  // ── Connect ──────────────────────────────────────────────────────────────────
   async function connect() {
     if (status === "live" || status === "connecting") return;
     setStatus("connecting");
     addLog("Requesting camera access…", "info");
 
-    let stream: MediaStream;
+    let rawStream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+      rawStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
     } catch (err) {
       addLog(`Camera error: ${(err as Error).message}`, "error");
       setStatus("error");
       return;
     }
 
-    localStreamRef.current = stream;
-    const vid = document.getElementById("localVideo") as HTMLVideoElement;
-    if (vid) vid.srcObject = stream;
+    rawStreamRef.current = rawStream;
     addLog("Camera stream acquired.", "success");
+
+    const CV_WS = process.env.NEXT_PUBLIC_CV_WS ?? "ws://localhost:8765";
+    const cvStream = startCVLoop(rawStream, CV_WS);
+    if (!cvStream) {
+      addLog("Failed to create CV canvas stream. Aborting.", "error");
+      setStatus("error");
+      rawStream.getTracks().forEach(t => t.stop());
+      return;
+    }
+    cvStreamRef.current = cvStream;
 
     const id = `CATAN-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     gameIdRef.current = id;
     setGameId(id);
     addLog(`Game session created: ${id}`, "success");
 
-    setupSocket(id, stream);
+    setupSocket(id, cvStream);
   }
 
-  // ── Rejoin existing session ──────────────────────────────────────────────
+  // ── Rejoin ───────────────────────────────────────────────────────────────────
   async function rejoin() {
     const id = gameIdRef.current;
     if (!id) return;
@@ -223,54 +440,68 @@ export default function Host() {
     setStatus("connecting");
     addLog("Rejoining session — requesting camera…", "info");
 
-    // Close any stale peer connections
     playersRef.current.forEach(({ pc }) => pc.close());
     playersRef.current.clear();
     setPlayers(0);
 
-    let stream: MediaStream;
+    let rawStream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+      rawStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
     } catch (err) {
       addLog(`Camera error: ${(err as Error).message}`, "error");
       setStatus("error");
       return;
     }
 
-    localStreamRef.current = stream;
-    const vid = document.getElementById("localVideo") as HTMLVideoElement;
-    if (vid) vid.srcObject = stream;
+    rawStreamRef.current = rawStream;
     addLog("Camera re-acquired.", "success");
 
-    // Re-register the same gameId so the server restores the room
-    setupSocket(id, stream);
+    const CV_WS = process.env.NEXT_PUBLIC_CV_WS ?? "ws://localhost:8765";
+    const cvStream = startCVLoop(rawStream, CV_WS);
+    if (!cvStream) {
+      addLog("Failed to create CV canvas stream. Aborting.", "error");
+      setStatus("error");
+      rawStream.getTracks().forEach(t => t.stop());
+      return;
+    }
+    cvStreamRef.current = cvStream;
+
+    setupSocket(id, cvStream);
   }
 
-  // ── Disconnect (explicit — notify players first) ─────────────────────────
+  // ── Disconnect ───────────────────────────────────────────────────────────────
   function disconnect() {
     const id = gameIdRef.current;
     const socket = socketRef.current;
+    stopCVLoop();
 
-    // Gracefully tell the server (and thereby all players) the host is leaving
     if (socket?.readyState === WebSocket.OPEN && id) {
       socket.send(JSON.stringify({ type: "host_leaving", gameId: id }));
       addLog("Notified players of host departure.", "warn");
     }
 
-    // Tear down peer connections
     playersRef.current.forEach(({ pc }) => pc.close());
     playersRef.current.clear();
-
     socket?.close();
     socketRef.current = null;
 
-    // Stop camera tracks
-    localStreamRef.current?.getTracks().forEach(t => t.stop());
-    localStreamRef.current = null;
+    rawStreamRef.current?.getTracks().forEach(t => t.stop());
+    rawStreamRef.current = null;
+    cvStreamRef.current = null;
+
     const vid = document.getElementById("localVideo") as HTMLVideoElement;
     if (vid) vid.srcObject = null;
+    const debugVid = document.getElementById("debugVideo") as HTMLVideoElement;
+    if (debugVid) debugVid.srcObject = null;
 
-    // Keep gameId in state so the host can rejoin with the same room code
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const c = canvas.getContext("2d");
+      c?.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
     setStatus("idle");
     setPlayers(0);
     addLog("Session disconnected. Room is inactive but code is preserved.", "warn");
@@ -292,7 +523,6 @@ export default function Host() {
     } catch { addLog("Failed to copy.", "error"); }
   }
 
-  // Whether we have a dormant session (disconnected but gameId preserved)
   const hasDormantSession = status === "idle" && gameId !== null;
 
   return (
@@ -329,9 +559,7 @@ export default function Host() {
               <div className="f-cinzel text-[#F0E6CC]/50 text-[9px] tracking-[0.45em] uppercase leading-none">CATAN</div>
             </div>
           </a>
-          <div className="flex items-center gap-3">
-            <StatusPill status={status} />
-          </div>
+          <StatusPill status={status} />
         </div>
       </nav>
 
@@ -362,11 +590,15 @@ export default function Host() {
       {/* ════ MAIN GRID ════ */}
       <main className="max-w-6xl mx-auto px-4 pb-24 grid lg:grid-cols-[1fr_380px] gap-6">
 
+        <video id="localVideo" autoPlay muted playsInline className="hidden" />
+
         {/* ── LEFT ── */}
         <div className="space-y-4">
+
           {/* Camera viewport */}
           <div className="relative rounded-xl border border-[#2A3347] overflow-hidden bg-[#060A10] card-glow" style={{ aspectRatio: "16/9" }}>
             {status === "live" && <div className="scan-line" />}
+
             {(["top-3 left-3", "top-3 right-3", "bottom-3 left-3", "bottom-3 right-3"] as const).map((pos, i) => (
               <div key={i} className={`absolute ${pos} w-5 h-5 pointer-events-none`}
                 style={{
@@ -402,9 +634,22 @@ export default function Host() {
               </div>
             )}
 
-            <video id="localVideo" autoPlay playsInline muted
+            <canvas
+              ref={canvasRef}
+              width={1280}
+              height={720}
               className={`w-full h-full object-cover transition-opacity duration-500 ${status === "live" ? "opacity-100" : "opacity-0"}`}
+              style={{ background: "#000" }}
             />
+
+            {status === "live" && cvStatus !== "processing" && (
+              <div className="absolute top-12 right-4 flex items-center gap-2 px-3 py-1.5 rounded border border-red-500/40 bg-[#0E1117]/80 backdrop-blur-sm z-20">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                <span className="f-cinzel text-[10px] tracking-[0.35em] uppercase text-red-400">
+                  {cvStatus === "no_board" ? "No Board Detected" : "CV Error"}
+                </span>
+              </div>
+            )}
 
             {status === "live" && (
               <>
@@ -421,21 +666,19 @@ export default function Host() {
 
             <div className="absolute bottom-0 left-0 right-0 px-4 py-3 z-20 bg-gradient-to-t from-[#0E1117]/90 to-transparent flex items-center justify-between">
               <span className="f-cinzel text-[9px] tracking-[0.4em] uppercase text-[#2A3347]">
-                {status === "live" ? "30 FPS · 1280×720" : "No signal"}
+                {status === "live" ? "15 FPS CV · 1280×720" : "No signal"}
               </span>
               {gameId && <span className="f-cinzel text-[9px] tracking-[0.3em] uppercase text-[#C8861A]/70">{gameId}</span>}
             </div>
           </div>
 
-          {/* ── Dormant session banner ── */}
           {hasDormantSession && (
             <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-yellow-500/30 bg-yellow-500/05">
               <span className="text-yellow-400 text-lg flex-shrink-0 mt-0.5">⚠️</span>
               <div>
                 <p className="f-cinzel text-[11px] text-yellow-400 tracking-widest uppercase mb-1">Session Inactive</p>
                 <p className="f-body text-xs text-[#6B7A99] leading-relaxed">
-                  The room is paused. Players who are connected will see a "Host disconnected" message and wait for you to rejoin.
-                  Press <span className="text-[#C8861A] font-semibold">Rejoin Session</span> to restore the connection with the same room code.
+                  The room is paused. Press <span className="text-[#C8861A] font-semibold">Rejoin Session</span> to restore the connection with the same room code.
                 </p>
               </div>
             </div>
@@ -473,7 +716,7 @@ export default function Host() {
             <div className="grid sm:grid-cols-2 gap-2 mt-2">
               <InfoRow icon="🎮" label="Session ID" value={gameId ?? "—"} accent="amber" />
               <InfoRow icon="👥" label="Players Joined" value={`${players} / 4`} accent="cyan" />
-              <InfoRow icon="📷" label="Frame Rate" value="30 FPS" accent="amber" />
+              <InfoRow icon="📷" label="CV Frame Rate" value="15 FPS" accent="amber" />
               <InfoRow icon="⚡" label="Sync Latency" value="< 50ms" accent="cyan" />
             </div>
           )}
@@ -486,8 +729,8 @@ export default function Host() {
             <div className="p-5 space-y-4">
               {[
                 { num: "01", icon: "📷", title: "Mount your camera overhead", desc: "Position so the entire board is visible. 60–80 cm height works well." },
-                { num: "02", icon: "🔗", title: "Press Connect Camera", desc: "Grants camera access and registers your room on the signaling server." },
-                { num: "03", icon: "📱", title: "Share the access code or link", desc: "Players enter the 5-character code on their device — no app required." },
+                { num: "02", icon: "🔗", title: "Press Connect Camera", desc: "Grants camera access, starts the CV pipeline, and registers your room." },
+                { num: "03", icon: "📱", title: "Share the access code or link", desc: "Players enter the 5-character code — they'll see the CV-processed board." },
                 { num: "04", icon: "⚔️", title: "Press Start Game", desc: "CV engine begins tracking pieces and the rule engine goes live." },
               ].map(({ num, icon, title, desc }) => (
                 <div key={num} className="flex gap-4 items-start group">
@@ -512,6 +755,7 @@ export default function Host() {
 
         {/* ── RIGHT ── */}
         <div className="space-y-4">
+
           {gameId && (
             <div className="rounded-xl border border-[#C8861A] bg-gradient-to-br from-[#C8861A]/10 to-[#0E1117] overflow-hidden card-glow p-5 text-center relative">
               <div className="absolute top-0 right-0 opacity-10 translate-x-1/4 -translate-y-1/4">
@@ -549,8 +793,8 @@ export default function Host() {
             <div className="p-5 space-y-3">
               {[
                 { icon: "📷", label: "Camera", active: status === "live" },
-                { icon: "👁️", label: "CV Engine", active: status === "live" },
-                { icon: "⚙️", label: "Game Server", active: status === "live" },
+                { icon: "👁️", label: "CV Engine", active: status === "live" && cvStatus === "processing" },
+                { icon: "🖼️", label: "Canvas Stream", active: status === "live" },
                 { icon: "📡", label: "WebSocket", active: status === "live" },
                 { icon: "📱", label: "Players", active: players > 0 },
               ].map(({ icon, label, active }, i) => (
@@ -601,21 +845,70 @@ export default function Host() {
             </div>
           </div>
 
-          {/* Log */}
+          {/* ── Raw Camera Debug Preview ── */}
+          <div className="rounded-xl border border-[#2A3347] bg-[#0E1117] overflow-hidden card-glow">
+            <div className="px-5 py-3 border-b border-[#2A3347] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 glow-pulse" />
+                <span className="f-cinzel text-xs text-yellow-400 tracking-[0.25em] uppercase">Raw Camera Debug</span>
+              </div>
+              <span className="f-cinzel text-[9px] text-[#4A5875] tracking-widest uppercase">pre-CV feed</span>
+            </div>
+            <div className="p-3 relative bg-[#060A10]" style={{ aspectRatio: "16/9" }}>
+              {status !== "live" && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-10">
+                  <span className="text-2xl opacity-30">📷</span>
+                  <p className="f-cinzel text-[10px] text-[#2A3347] tracking-[0.3em] uppercase">No signal</p>
+                </div>
+              )}
+              <video
+                id="debugVideo"
+                autoPlay
+                muted
+                playsInline
+                className={`w-full h-full object-cover rounded transition-opacity duration-500 ${status === "live" ? "opacity-100" : "opacity-0"}`}
+                style={{ background: "#000" }}
+              />
+              {status === "live" && (
+                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between px-2">
+                  <span className="f-cinzel text-[9px] text-yellow-400/70 tracking-[0.3em] uppercase bg-[#0A0F18]/80 px-2 py-0.5 rounded">
+                    raw · no cv
+                  </span>
+                  <span className="f-cinzel text-[9px] text-[#4A5875] tracking-[0.2em] uppercase bg-[#0A0F18]/80 px-2 py-0.5 rounded">
+                    debug only
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Connection Log ── */}
           <div className="rounded-xl border border-[#2A3347] bg-[#0E1117] overflow-hidden card-glow">
             <div className="px-5 py-3 border-b border-[#2A3347] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 glow-pulse" />
                 <span className="f-cinzel text-xs text-[#38BDF8] tracking-[0.25em] uppercase">Connection Log</span>
               </div>
-              <button onClick={() => setLogs([{ ts: now(), msg: "Log cleared.", type: "info" }])}
-                className="f-cinzel text-[9px] text-[#2A3347] hover:text-[#4A5875] tracking-widest uppercase transition-colors">
-                Clear
-              </button>
+              <div className="flex items-center gap-3">
+                <span className="f-cinzel text-[9px] text-purple-400 tracking-widest uppercase px-2 py-0.5 border border-purple-500/30 rounded">
+                  CV = board state
+                </span>
+                <button
+                  onClick={() => setLogs([{ ts: now(), msg: "Log cleared.", type: "info" }])}
+                  className="f-cinzel text-[9px] text-[#2A3347] hover:text-[#4A5875] tracking-widest uppercase transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
-            <div className="p-3 h-64 overflow-y-auto space-y-1" style={{ scrollbarColor: "#2A3347 transparent" }}>
+            <div className="p-3 h-72 overflow-y-auto space-y-1" style={{ scrollbarColor: "#2A3347 transparent" }}>
               {logs.map((entry, i) => (
-                <div key={i} className={`log-entry flex gap-2 text-xs font-mono py-1 px-2 rounded ${i === 0 ? "bg-[#161C27]" : ""}`}>
+                <div
+                  key={i}
+                  className={`log-entry flex gap-2 text-xs font-mono py-1 px-2 rounded
+                    ${i === 0 ? "bg-[#161C27]" : ""}
+                    ${entry.type === "cv" ? "border-l-2 border-purple-500/40 pl-3" : ""}`}
+                >
                   <span className="text-[#2A3347] flex-shrink-0">{entry.ts}</span>
                   <span className={LOG_COLORS[entry.type]}>{entry.msg}</span>
                 </div>
@@ -629,8 +922,9 @@ export default function Host() {
             <div>
               <p className="f-cinzel text-[10px] text-[#C8861A] tracking-widest uppercase mb-1">Environment</p>
               <p className="f-body text-xs text-[#4A5875] leading-relaxed">
-                Set <code className="text-[#F0C060] bg-[#0A0F18] px-1 rounded">NEXT_PUBLIC_HOST_WS</code> in{" "}
-                <code className="text-[#7DD3FC] bg-[#0A0F18] px-1 rounded">.env.local</code> to your signaling server URL.
+                Set <code className="text-[#F0C060] bg-[#0A0F18] px-1 rounded">NEXT_PUBLIC_HOST_WS</code> and{" "}
+                <code className="text-[#F0C060] bg-[#0A0F18] px-1 rounded">NEXT_PUBLIC_CV_WS</code> in{" "}
+                <code className="text-[#7DD3FC] bg-[#0A0F18] px-1 rounded">.env.local</code>.
               </p>
             </div>
           </div>

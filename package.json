@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server.ts",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "concurrently -n \"next,cv\" -c \"cyan,yellow\" \"npx tsx server.ts\" \"./detection-model/venv/bin/python detection-model/model.py\"",
+    "dev:next": "npx tsx server.ts",
+    "dev:cv": "./detection-model/venv/bin/python detection-model/model.py"
   },
   "dependencies": {
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-webgl": "^4.22.0",
     "cors": "^2.8.6",
     "next": "^16.2.3",
     "react": "19.2.4",
@@ -26,6 +26,7 @@
     "@types/react-dom": "^19",
     "@types/simple-peer": "^9.11.9",
     "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",

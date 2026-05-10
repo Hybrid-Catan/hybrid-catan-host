@@ -11,7 +11,7 @@ const handler = app.getRequestHandler();
 
 app.prepare().then(() => {
     const httpServer = createServer((req, res) => {
-        res.setHeader("Access-Control-Allow-Origin", "http://localhost:3001");
+        res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
         res.setHeader("Access-Control-Allow-Headers", "Content-Type");
         if (req.method === "OPTIONS") {
@@ -175,5 +175,7 @@ app.prepare().then(() => {
 
     httpServer
         .once("error", (err) => { console.error(err); process.exit(1); })
-        .listen(port, () => console.log(`> Ready on http://${hostname}:${port}`));
+        .listen(port, "0.0.0.0", () =>
+            console.log(`> Ready on http://192.168.21.11:${port}`)
+        );
 });
