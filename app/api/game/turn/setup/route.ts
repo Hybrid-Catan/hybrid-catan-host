@@ -1,21 +1,25 @@
-import type { GameState } from "@/utils/type";
-import {
-    setNextPlayer,
-    setPhaseToSetup2,
-    setPhaseToRoll,
-    isLastPlayerInSetup1,
-    isLastPlayerInSetup2,
-} from "@/backend/gamelogic/turnmanagement/turnmanagement";
+import { NextResponse } from "next/server";
+import { confirmSetupRoad } from "@/backend/gamelogic/turnmanagement/turnmanagement";
 
-export function confirmSetupRoad(gameState: GameState): GameState {
+export async function POST(req: Request) {
+  try {
+    const { gameState } = await req.json();
 
-    if (isLastPlayerInSetup1(gameState)) {
-        return setPhaseToSetup2(gameState);
-    }
+    const updated = confirmSetupRoad(gameState);
 
-    if (isLastPlayerInSetup2(gameState)) {
-        return setPhaseToRoll(gameState);
-    }
+    console.dir(updated, { depth: null })
 
-    return setNextPlayer(gameState);
+    return NextResponse.json({
+      success: true,
+      data: updated,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: err.message ?? "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
 }

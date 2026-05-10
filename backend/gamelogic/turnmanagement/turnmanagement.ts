@@ -79,3 +79,16 @@ export function isLastPlayerInSetup2(gameState: GameState): boolean {
         gameState.players[0].sequence === 1
     );
 }
+
+export function confirmSetupRoad(gameState: GameState): GameState {
+
+    if (isLastPlayerInSetup1(gameState)) {
+        return setPhaseToSetup2(gameState);
+    }
+
+    if (isLastPlayerInSetup2(gameState)) {
+        return setPhaseToRoll(gameState);
+    }
+
+    return setNextPlayer(gameState);
+}

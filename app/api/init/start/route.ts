@@ -8,15 +8,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false }, { status: 400 });
   }
 
-  if (gameState.players.length < 3) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "A minimum of 3 players is required to play Catan!",
-      },
-      { status: 400 }
-    );
-  }
+  // if (gameState.players.length < 3) {
+  //   return NextResponse.json(
+  //     {
+  //       success: false,
+  //       error: "A minimum of 3 players is required to play Catan!",
+  //     },
+  //     { status: 400 }
+  //   );
+  // }
 
   const newState = {
     ...gameState,
