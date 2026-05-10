@@ -101,6 +101,85 @@ export default function Host() {
   const [players, setPlayers] = useState(0);
   const [gameId, setGameId] = useState<string | null>(null);
 
+
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cvSocketRef = useRef<WebSocket | null>(null);
+  const frameLoopRef = useRef<number | null>(null);
+  const [cvStatus, setCvStatus] = useState<"idle" | "processing" | "no_board" | "error">("idle");
+  function startCVLoop(stream: MediaStream, cvWsUrl: string) {
+    const offscreen = document.createElement("canvas");
+    offscreen.width = 1280;
+    offscreen.height = 720;
+    const ctx = offscreen.getContext("2d")!;
+
+    const vid = document.getElementById("localVideo") as HTMLVideoElement;
+
+    const cvSocket = new WebSocket(cvWsUrl);
+    cvSocket.binaryType = "arraybuffer";
+    cvSocketRef.current = cvSocket;
+
+    let waiting = false; // backpressure: only send next frame when reply arrives
+
+    cvSocket.onopen = () => {
+      addLog("CV WebSocket connected.", "success");
+      setCvStatus("processing");
+    };
+
+    cvSocket.onmessage = (e) => {
+      waiting = false;
+      if (e.data instanceof ArrayBuffer) {
+        const blob = new Blob([e.data], { type: "image/jpeg" });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const c = canvas.getContext("2d")!;
+          c.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+        setCvStatus("processing");
+      } else {
+        // JSON error message
+        try {
+          const msg = JSON.parse(
+            typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data)
+          );
+          if (msg.error === "no_board") setCvStatus("no_board");
+          else setCvStatus("error");
+        } catch { }
+      }
+    };
+
+    cvSocket.onerror = () => { addLog("CV WebSocket error.", "error"); setCvStatus("error"); };
+    cvSocket.onclose = () => { addLog("CV WebSocket closed.", "warn"); };
+
+    // Capture + send frames at ~10 FPS (100ms interval — CV is the bottleneck)
+    frameLoopRef.current = window.setInterval(() => {
+      if (waiting || cvSocket.readyState !== WebSocket.OPEN) return;
+      if (!vid.videoWidth) return;
+      offscreen.width = vid.videoWidth;
+      offscreen.height = vid.videoHeight;
+      ctx.drawImage(vid, 0, 0);
+      offscreen.toBlob((blob) => {
+        if (!blob) return;
+        blob.arrayBuffer().then((buf) => {
+          if (cvSocket.readyState === WebSocket.OPEN) {
+            cvSocket.send(buf);
+            waiting = true;
+          }
+        });
+      }, "image/jpeg", 0.85);
+    }, 100);
+  }
+  function stopCVLoop() {
+    if (frameLoopRef.current) { clearInterval(frameLoopRef.current); frameLoopRef.current = null; }
+    cvSocketRef.current?.close();
+    cvSocketRef.current = null;
+    setCvStatus("idle");
+  }
   function addLog(msg: string, type: LogEntry["type"] = "info") {
     setLogs(l => [{ ts: now(), msg, type }, ...l].slice(0, 40));
   }
@@ -206,6 +285,8 @@ export default function Host() {
     const vid = document.getElementById("localVideo") as HTMLVideoElement;
     if (vid) vid.srcObject = stream;
     addLog("Camera stream acquired.", "success");
+    const CV_WS = process.env.NEXT_PUBLIC_CV_WS ?? "ws://localhost:8765";
+    startCVLoop(stream, CV_WS);
 
     const id = `CATAN-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     gameIdRef.current = id;
@@ -250,7 +331,7 @@ export default function Host() {
   function disconnect() {
     const id = gameIdRef.current;
     const socket = socketRef.current;
-
+    stopCVLoop();
     // Gracefully tell the server (and thereby all players) the host is leaving
     if (socket?.readyState === WebSocket.OPEN && id) {
       socket.send(JSON.stringify({ type: "host_leaving", gameId: id }));
@@ -361,7 +442,13 @@ export default function Host() {
 
       {/* ════ MAIN GRID ════ */}
       <main className="max-w-6xl mx-auto px-4 pb-24 grid lg:grid-cols-[1fr_380px] gap-6">
-
+        <video
+          id="localVideo"
+          autoPlay
+          muted
+          playsInline
+          className="hidden"
+        />
         {/* ── LEFT ── */}
         <div className="space-y-4">
           {/* Camera viewport */}
@@ -402,9 +489,22 @@ export default function Host() {
               </div>
             )}
 
-            <video id="localVideo" autoPlay playsInline muted
+            {/* Replace the <video> tag entirely */}
+            <canvas
+              ref={canvasRef}
               className={`w-full h-full object-cover transition-opacity duration-500 ${status === "live" ? "opacity-100" : "opacity-0"}`}
+              style={{ background: "#000" }}
             />
+
+            {/* Add CV status badge alongside existing LIVE badge */}
+            {status === "live" && cvStatus !== "processing" && (
+              <div className="absolute top-12 right-4 flex items-center gap-2 px-3 py-1.5 rounded border border-red-500/40 bg-[#0E1117]/80 backdrop-blur-sm z-20">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                <span className="f-cinzel text-[10px] tracking-[0.35em] uppercase text-red-400">
+                  {cvStatus === "no_board" ? "No Board Detected" : "CV Error"}
+                </span>
+              </div>
+            )}
 
             {status === "live" && (
               <>
