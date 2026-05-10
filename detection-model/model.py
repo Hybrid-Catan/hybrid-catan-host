@@ -5,9 +5,19 @@ import asyncio
 import websockets
 import tensorflow as tf
 from scipy.spatial.distance import cdist
+import json
+from dataclasses import dataclass, asdict
+from typing import Optional
+
+@dataclass
+class BoardState:
+    tile_results: list       # [{row, col, cx, cy, resource, number}]
+    port_results: list       # [{cx, cy, label, resource}]
+    robber_tile_index: Optional[int]
+    vertex_colors: list      # [{cx, cy, color, hex_index}]
+    edge_colors: list        # [{cx, cy, angle, color, hex_index}]
 
 # ── Config ────────────────────────────────────────────────────────────────────
-# remove image_path — not needed anymore
 LOWER_TEAL = np.array([ 80,  20,   0])
 UPPER_TEAL = np.array([110, 255, 255])
 
@@ -66,6 +76,9 @@ DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
 
+# FIX 3: SAT_BOOST / VAL_BOOST moved to module level so _boost() can use them
+SAT_BOOST, VAL_BOOST = 1.8, 1.5
+
 PLAYER_DRAW_COLORS = {
     "orange": (0,   120, 220),
     "red":    (0,    30, 200),
@@ -98,6 +111,17 @@ COLOR_RANGES = [
     ("rect",     "white",  *_range("#ffffff", "#faffec")),
     ("triangle", "white",  *_range("#afb6ad", "#ffffff")),
 ]
+
+# FIX 3: _boost() extracted to module level so both draw_vertices_edges
+#         and the board-state builder inside process_frame can call it.
+def _boost(bgr):
+    c = np.array(bgr, dtype=np.float32)
+    if np.linalg.norm(c - DESERT_BGR) < DESERT_THRESHOLD:
+        return bgr
+    px = np.array([[bgr]], dtype=np.uint8)
+    h, s, v = cv2.cvtColor(px, cv2.COLOR_BGR2HSV).astype(np.float32)[0, 0]
+    out = np.array([[[h, min(255., s * SAT_BOOST), min(255., v * VAL_BOOST)]]], dtype=np.uint8)
+    return tuple(int(x) for x in cv2.cvtColor(out, cv2.COLOR_HSV2BGR)[0, 0])
 
 # ── TensorFlow utilities ──────────────────────────────────────────────────────
 def tf_classify_tile(avg_bgr_np):
@@ -540,8 +564,9 @@ def detect_port_blobs(board_img, tile_results, R):
         blobs.append((cx, cy, roi))
     return blobs
 
+# FIX 4: draw_ports now returns (port_board, port_results) so the caller
+#         can access port_results when building the board state payload.
 def draw_ports(port_board, blobs, R, H, W):
-    # ← fixed path: relative to this script's location
     PORT_TEMPLATES = load_port_templates(
         os.path.join(os.path.dirname(__file__), "port_templates")
     )
@@ -588,7 +613,9 @@ def draw_ports(port_board, blobs, R, H, W):
         (tw,th),_ = cv2.getTextSize(label, FONT, scale, 1)
         cv2.putText(port_board, label, (cx-tw//2, cy+th//2), FONT, scale, (0,0,0),       2, cv2.LINE_AA)
         cv2.putText(port_board, label, (cx-tw//2, cy+th//2), FONT, scale, (255,255,255), 1, cv2.LINE_AA)
-    return port_board
+
+    # FIX 4: return both the drawn board and the port_results list
+    return port_board, port_results
 
 # ── Frame processor ───────────────────────────────────────────────────────────
 def _encode(img: np.ndarray, quality: int = 82) -> bytes:
@@ -600,11 +627,14 @@ def _error_frame(img, msg: str) -> bytes:
     cv2.putText(out, msg, (20, 50), FONT, 0.8, (0, 80, 255), 2, cv2.LINE_AA)
     return _encode(out)
 
-def process_frame(jpg_bytes: bytes) -> tuple[bytes, str]:
+# FIX 1+2+7: return type updated to 3-tuple; all early-exit paths return {}
+#             as the third element so callers never see a 2-tuple.
+def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
     arr = np.frombuffer(jpg_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        return _error_frame(None, "Failed to decode frame"), "decode_error"
+        # FIX 7: empty dict as third value
+        return _error_frame(None, "Failed to decode frame"), "decode_error", {}
 
     l, a, b  = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2LAB))
     orig_eq  = cv2.cvtColor(
@@ -623,7 +653,8 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str]:
         (tw, th), _ = cv2.getTextSize(msg, FONT, 1.2, 2)
         cv2.rectangle(out, (16, 16), (36 + tw, 36 + th), (0, 0, 0), -1)
         cv2.putText(out, msg, (24, 24 + th), FONT, 1.2, (0, 80, 255), 2, cv2.LINE_AA)
-        return _encode(out), "no_board"
+        # FIX 7: empty dict as third value
+        return _encode(out), "no_board", {}
 
     try:
         center      = np.mean(hex_points, axis=0)[0]
@@ -664,35 +695,128 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str]:
             cv2.putText(overlay, "ROBBER", (tx-tw//2, ty+th//2),
                         FONT, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
 
-        final_board2 = place_numbers(overlay, tile_results, R)
-        blobs        = detect_port_blobs(final_hex_crop, tile_results, R)
-        result       = draw_ports(final_board2.copy(), blobs, R, H, W)
-        return _encode(result), "ok"
+        final_board2       = place_numbers(overlay, tile_results, R)
+        blobs              = detect_port_blobs(final_hex_crop, tile_results, R)
+        # FIX 4: unpack both return values from draw_ports
+        result, port_results = draw_ports(final_board2.copy(), blobs, R, H, W)
+
+        # ── Build board state payload ─────────────────────────────────────
+        # FIX 1+2: this block is now correctly indented inside the try,
+        #           and the return below replaces the old single-value return.
+        spiral_lookup = {pos: i for i, pos in enumerate(CATAN_SPIRAL_POSITIONS)}
+
+        board_tiles   = []
+        number_iter2  = iter(CATAN_SPIRAL_NUMBERS)
+        seen2         = set()
+        tile_lookup   = {(r, t): (tx, ty, res) for r, t, tx, ty, res in tile_results}
+
+        for pos in CATAN_SPIRAL_POSITIONS:
+            if pos in seen2 or pos not in tile_lookup:
+                seen2.add(pos)
+                continue
+            seen2.add(pos)
+            r_idx, t_idx = pos
+            tx, ty, res  = tile_lookup[pos]
+            number = None if res == "Desert" else next(number_iter2, None)
+            board_tiles.append({
+                "spiralIndex": spiral_lookup.get(pos),
+                "row":         r_idx,
+                "col":         t_idx,
+                "cx":          tx,
+                "cy":          ty,
+                "resource":    res,
+                "number":      number,
+            })
+
+        # Robber tile index
+        robber_idx = None
+        if robber_data:
+            (rtx, rty), _ = robber_data
+            robber_idx = next(
+                (bt["spiralIndex"] for bt in board_tiles
+                 if bt["cx"] == rtx and bt["cy"] == rty),
+                None
+            )
+
+        # Vertex and edge color samples
+        vertex_list, edge_list = [], []
+        for _, _, tx, ty, _ in tile_results:
+            hex_idx = next(
+                (bt["spiralIndex"] for bt in board_tiles
+                 if bt["cx"] == tx and bt["cy"] == ty),
+                None
+            )
+            for i in range(6):
+                a  = np.deg2rad(30 + i * 60)
+                vx, vy = int(tx + R * np.cos(a)), int(ty + R * np.sin(a))
+                sm = np.zeros((H, W), dtype=np.uint8)
+                cv2.circle(sm, (vx, vy), 4, 255, -1)
+                raw = avg_bgr_region(final_hex_crop, sm)
+                lbl, _ = classify_color(_boost(raw), "triangle")
+                vertex_list.append({"cx": vx, "cy": vy, "hexIndex": hex_idx, "color": lbl})
+
+            for i in range(6):
+                a0 = np.deg2rad(30 + i * 60);       a1 = np.deg2rad(30 + (i + 1) * 60)
+                vx0, vy0 = tx + R * np.cos(a0), ty + R * np.sin(a0)
+                vx1, vy1 = tx + R * np.cos(a1), ty + R * np.sin(a1)
+                mx, my   = int((vx0 + vx1) / 2),   int((vy0 + vy1) / 2)
+                ea       = float(np.degrees(np.arctan2(vy1 - vy0, vx1 - vx0)))
+                sm       = np.zeros((H, W), dtype=np.uint8)
+                cv2.fillPoly(sm, [cv2.boxPoints(
+                    ((float(mx), float(my)), (24., 8.), ea)).astype(np.int32)], 255)
+                raw = avg_bgr_region(final_hex_crop, sm)
+                lbl, _ = classify_color(_boost(raw), "rect")
+                edge_list.append({"cx": mx, "cy": my, "angle": round(ea, 1),
+                                   "hexIndex": hex_idx, "color": lbl})
+
+        port_list = []
+        for cx, cy, port_label, _, _ in port_results:
+            res_key = port_label.split()[-1] if port_label.startswith("2:1") else "3:1"
+            port_list.append({"cx": cx, "cy": cy, "label": port_label, "resource": res_key})
+
+        state = BoardState(
+            tile_results      = board_tiles,
+            port_results      = port_list,
+            robber_tile_index = robber_idx,
+            vertex_colors     = vertex_list,
+            edge_colors       = edge_list,
+        )
+
+        # FIX 1+2: return 3-tuple with state dict; replaces old 2-tuple return
+        return _encode(result), "ok", asdict(state)
 
     except Exception as e:
         print(f"[CV] Pipeline error: {e}")
-        return _error_frame(img, f"Error: {str(e)[:80]}"), "error"
-    
+        # FIX 7: empty dict as third value
+        return _error_frame(img, f"Error: {str(e)[:80]}"), "error", {}
+
 def test_image(image_path: str, output_path: str = "test_output.jpg"):
     with open(image_path, "rb") as f:
         jpg_bytes = f.read()
-    
-    result_bytes, status = process_frame(jpg_bytes)
-    
+
+    # FIX 6: unpack 3 values; ignore the state dict with _
+    result_bytes, status, _ = process_frame(jpg_bytes)
+
     with open(output_path, "wb") as f:
         f.write(result_bytes)
-    
+
     print(f"Status: {status}")
     print(f"Output saved to: {output_path}")
 
 # ── WebSocket server ──────────────────────────────────────────────────────────
+# FIX 5: duplicate/broken handler removed; single clean handler below
 async def cv_handler(websocket):
     print(f"[CV] Client connected: {websocket.remote_address}")
     try:
         async for message in websocket:
             if isinstance(message, bytes):
-                processed, status = process_frame(message)
+                processed, status, state = process_frame(message)
                 await websocket.send(processed)
+                # Always send JSON second message so client toggle stays in sync
+                if status == "ok":
+                    await websocket.send(json.dumps(state).encode())
+                else:
+                    await websocket.send(json.dumps({"error": status}).encode())
     except websockets.exceptions.ConnectionClosed:
         print(f"[CV] Client disconnected")
 
@@ -704,10 +828,8 @@ async def main():
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
-        # Test mode: python model.py my_board.jpg
         inp = sys.argv[1]
         out = sys.argv[2] if len(sys.argv) > 2 else "test_output.jpg"
         test_image(inp, out)
     else:
-        # Normal WebSocket server mode
         asyncio.run(main())
