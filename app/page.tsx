@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
+import { createGame } from "./lib/createGame";
 
 interface MiniHexProps {
   x: number; y: number; size: number; fill: string;
@@ -428,6 +429,18 @@ export default function Host() {
     gameIdRef.current = id;
     setGameId(id);
     addLog(`Game session created: ${id}`, "success");
+
+    try {
+      const result = await createGame(id)
+
+      if (!result.success) {
+        alert(result.error)
+        return
+      }
+    } catch (error) {
+      console.error(error)
+      alert("Failed to create game")
+    }
 
     setupSocket(id, cvStream);
   }
