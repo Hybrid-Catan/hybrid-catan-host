@@ -2,6 +2,7 @@
 
 import { addTradeToGameState, cancelTrade, clearTrades, deleteTrade, fulfillTrade } from "@/backend/gamelogic/trading/trading";
 import { checkReceiverTradeRequest, isTradeActive, checkSenderTradeRequest } from "@/backend/gamelogic/gamerules/tradevalidation";
+import { games } from "@/app/lib/games";
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
@@ -16,6 +17,8 @@ export async function POST(req: NextRequest) {
         if (!checkReceiverTradeRequest(sender, receiver, sendingCards, receivingCards, gameState)) {
             updatedGameState.tradeState.trades[0].canAccept = false;
         }
+
+        games.set(updatedGameState.gameId, updatedGameState);
 
         return NextResponse.json(updatedGameState, { status: 200 });
 
