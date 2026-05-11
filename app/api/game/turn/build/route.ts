@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setPhaseToBuild } from "@/backend/gamelogic/turnmanagement/turnmanagment";
+import { setPhaseToBuild } from "@/backend/gamelogic/turnmanagement/turnmanagement";
 export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
         const { gameState } = await req.json();
