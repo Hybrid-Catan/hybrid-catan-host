@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cancelTrade } from "@/backend/gamelogic/trading/trading";
+import { games } from "@/app/lib/games";
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,6 +14,8 @@ export async function POST(req: NextRequest) {
     }
 
     const newGameState = cancelTrade(gameState, tradeIndex);
+
+    games.set(newGameState.gameId, newGameState);
 
     return NextResponse.json(
       { success: true, data: newGameState },
