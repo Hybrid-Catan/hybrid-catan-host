@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildCity } from "@/backend/gamelogic/playerstatmanagement/playerstatmanagement";
+import { games } from "@/app/lib/games";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
@@ -11,6 +12,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 { status: 400 }
             );
         }
+        games.set(newGameState.gameId, newGameState);
         return NextResponse.json(
             { success: true, data: newGameState },
             { status: 200 }

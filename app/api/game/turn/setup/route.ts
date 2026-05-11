@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { confirmSetupRoad } from "@/backend/gamelogic/turnmanagement/turnmanagement";
+import { games } from "@/app/lib/games";
 
 export async function POST(req: Request) {
   try {
@@ -7,7 +8,7 @@ export async function POST(req: Request) {
 
     const updated = confirmSetupRoad(gameState);
 
-    console.dir(updated, { depth: null })
+    games.set(updated.gameId, updated);
 
     return NextResponse.json({
       success: true,

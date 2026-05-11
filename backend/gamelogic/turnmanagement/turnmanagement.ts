@@ -18,7 +18,7 @@ export function setPhaseToSetup2(gameState: GameState): GameState {
         ...gameState,
         status: "SETUP",
         phase: "SETUP_2",
-        players: [...gameState.players].reverse(),
+        players: [...gameState.players].sort((a, b) => b.sequence - a.sequence),
     };
 }
 
