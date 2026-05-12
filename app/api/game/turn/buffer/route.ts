@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { games } from "@/app/lib/games";
 
 export async function POST(req: Request) {
   const gameState = await req.json();
@@ -12,7 +13,9 @@ export async function POST(req: Request) {
     dice: { sum: d1 + d2 },
   };
 
-  console.dir(newGameState, { depth: null });
+  if (newGameState.gameId) {
+    games.set(newGameState.gameId, newGameState);
+  }
 
   return NextResponse.json({
     gameState: newGameState,
