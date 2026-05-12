@@ -838,7 +838,7 @@ export default function Host() {
               {[
                 { color: "bg-red-500", label: "Red", host: false },
                 { color: "bg-blue-500", label: "Blue", host: false },
-                { color: "bg-emerald-600", label: "White", host: false },
+                { color: "bg-olive-300", label: "White", host: false },
                 { color: "bg-orange-500", label: "Orange", host: false },
               ].map(({ color, label, host }, i) => {
                 const joined = players.has(i);
