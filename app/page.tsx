@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState, useEffect } from "react";
 import QRCode from "react-qr-code";
+import { createGame } from "./lib/createGame";
 
 interface MiniHexProps {
   x: number; y: number; size: number; fill: string;
@@ -108,7 +109,7 @@ export default function Host() {
   useEffect(() => {
     setLogs([{ ts: now(), msg: "System ready — press Connect to start.", type: "info" }]);
   }, []);
-  const [players, setPlayers] = useState(0);
+  const [players, setPlayers] = useState<Set<number>>(new Set());
   const [gameId, setGameId] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
