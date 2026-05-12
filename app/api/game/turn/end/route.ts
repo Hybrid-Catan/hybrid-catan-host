@@ -3,7 +3,6 @@ import { setNextPlayer, setPhaseToRoll } from "@/backend/gamelogic/turnmanagemen
 import { games } from "@/app/lib/games";
 export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
-        //1. Turn the state to roll phase
         const { gameState } = await req.json();
         const rollPhase = setPhaseToRoll(gameState);
 

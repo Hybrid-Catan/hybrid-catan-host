@@ -6,7 +6,7 @@ import {
   canBuyDevCard,
   calculateVictoryPoints
 } from "../gamerules/gamerules.ts";
-import { getTurnPlayerId } from "../turnmanagement/turnmanagment.ts";
+import { getTurnPlayerId } from "../turnmanagement/turnmanagement.ts";
 
 type Resource = keyof Player["resourceCards"];
 type DevCard = keyof Player["developmentCards"];
@@ -96,20 +96,20 @@ export function buildSettlement(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
-  if (
-    gameState.phase !== "BUILD" &&
-    gameState.phase !== "SETUP_1" &&
-    gameState.phase !== "SETUP_2"
-  ) {
-    return false;
-  }
+  // if (
+  //   gameState.phase !== "BUILD" &&
+  //   gameState.phase !== "SETUP_1" &&
+  //   gameState.phase !== "SETUP_2"
+  // ) {
+  //   return false;
+  // }
   const check = canBuildSettlement(player);
   if (!check.valid) {
     return false;
   }
-  if (gameState.phase === "BUILD") {
-    if (!spendResources(player, SETTLEMENT_COST)) return false;
-  }
+  // if (gameState.phase === "BUILD") {
+     if (!spendResources(player, SETTLEMENT_COST)) return false;
+  // }
   player.pieces.settlementsPlaced += 1;
   return { ...gameState };
 }
@@ -119,9 +119,9 @@ export function buildCity(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
-  if (gameState.phase !== "BUILD") {
-    return false;
-  }
+  // if (gameState.phase !== "BUILD") {
+  //   return false;
+  // }
   const check = canUpgradeToCity(player);
   if (!check.valid) {
     return false;
@@ -143,9 +143,9 @@ export function buildRoad(gameState: GameState): GameState | false {
     player.pieces.roadsPlaced += 1;
     return { ...gameState };
   }
-  if (gameState.phase !== "BUILD") {
-    return false;
-  }
+  // if (gameState.phase !== "BUILD") {
+  //   return false;
+  // }
   const check = canBuildRoad(player);
   if (!check.valid) {
     return false;
@@ -162,9 +162,9 @@ export function buyDevCard(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
-  if (gameState.phase !== "BUILD") {
-    return false;
-  }
+  // if (gameState.phase !== "BUILD") {
+  //   return false;
+  // }
   const check = canBuyDevCard(player, gameState);
   if (!check.valid) {
     return false;

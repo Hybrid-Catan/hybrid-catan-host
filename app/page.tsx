@@ -334,7 +334,7 @@ export default function Host() {
 
       if (data.type === "player_joined") {
         const pidx = data.playerIndex;
-        setPlayers(p => p + 1);
+        setPlayers(prev => new Set([...prev, pidx]));
         addLog(`Player ${pidx} detected — initiating handshake…`, "success");
 
         const stream = cvStreamRef.current;
@@ -450,6 +450,18 @@ export default function Host() {
     setGameId(id);
     addLog(`Game session created: ${id}`, "success");
 
+    try {
+      const result = await createGame(id)
+
+      if (!result.success) {
+        alert(result.error)
+        return
+      }
+    } catch (error) {
+      console.error(error)
+      alert("Failed to create game")
+    }
+
     setupSocket(id, cvStream);
   }
 
@@ -463,7 +475,7 @@ export default function Host() {
 
     playersRef.current.forEach(({ pc }) => pc.close());
     playersRef.current.clear();
-    setPlayers(0);
+    setPlayers(new Set());
 
     let rawStream: MediaStream;
     try {
@@ -524,7 +536,7 @@ export default function Host() {
     }
 
     setStatus("idle");
-    setPlayers(0);
+    setPlayers(new Set());
     addLog("Session disconnected. Room is inactive but code is preserved.", "warn");
   }
 
@@ -737,7 +749,7 @@ export default function Host() {
           {status === "live" && (
             <div className="grid sm:grid-cols-2 gap-2 mt-2">
               <InfoRow icon="🎮" label="Session ID" value={gameId ?? "—"} accent="amber" />
-              <InfoRow icon="👥" label="Players Joined" value={`${players} / 4`} accent="cyan" />
+              <InfoRow icon="👥" label="Players Joined" value={`${players.size} / 4`} accent="cyan" />
               <InfoRow icon="📷" label="CV Frame Rate" value="15 FPS" accent="amber" />
               <InfoRow icon="⚡" label="Sync Latency" value="< 50ms" accent="cyan" />
             </div>
@@ -829,7 +841,7 @@ export default function Host() {
                 { icon: "👁️", label: "CV Engine", active: status === "live" && cvStatus === "processing" },
                 { icon: "🖼️", label: "Canvas Stream", active: status === "live" },
                 { icon: "📡", label: "WebSocket", active: status === "live" },
-                { icon: "📱", label: "Players", active: players > 0 },
+                { icon: "📱", label: "Players", active: players.size > 0 },
               ].map(({ icon, label, active }, i) => (
                 <div key={label}>
                   <div className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-all duration-500
@@ -852,16 +864,16 @@ export default function Host() {
           <div className="rounded-xl border border-[#38BDF8]/15 bg-[#0E1117] overflow-hidden card-glow">
             <div className="px-5 py-3 border-b border-[#38BDF8]/12 flex items-center justify-between">
               <span className="f-cinzel text-xs text-[#38BDF8] tracking-[0.25em] uppercase">Players</span>
-              <span className="f-cinzel text-xs text-[#4A5875]">{players} / 4 joined</span>
+              <span className="f-cinzel text-xs text-[#4A5875]">{players.size} / 4 joined</span>
             </div>
             <div className="p-4 space-y-2">
               {[
-                { color: "bg-red-500", label: "Red", host: true },
+                { color: "bg-red-500", label: "Red", host: false },
                 { color: "bg-blue-500", label: "Blue", host: false },
-                { color: "bg-emerald-600", label: "Green", host: false },
+                { color: "bg-emerald-600", label: "White", host: false },
                 { color: "bg-orange-500", label: "Orange", host: false },
               ].map(({ color, label, host }, i) => {
-                const joined = i === 0 ? status === "live" : i < players + (status === "live" ? 1 : 0);
+                const joined = players.has(i);
                 return (
                   <div key={label} className={`flex items-center gap-3 px-3 py-2 rounded border transition-all duration-300
                     ${joined ? "border-[#2A3347] bg-[#161C27]" : "border-[#161C27] bg-[#0A0F18] opacity-40"}`}>
