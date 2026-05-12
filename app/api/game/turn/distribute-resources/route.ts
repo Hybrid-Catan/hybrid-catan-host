@@ -4,7 +4,7 @@ import { distributeResource } from "@/backend/gamelogic/playerstatmanagement/pla
 export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
         const { gameState } = await req.json();
-        const resourceMap = getActiveResourcesInfo(gameState);
+        const resourceMap = getActiveResourcesInfo();
         const newGameState = distributeResource(gameState, resourceMap);
         return NextResponse.json(
             { success: true, data: newGameState },
