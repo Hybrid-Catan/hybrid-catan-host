@@ -3,7 +3,6 @@ import { useRef, useState, useEffect } from "react";
 import { createGame } from "./lib/createGame"
 import QRCode from "react-qr-code";
 
-
 interface MiniHexProps {
   x: number; y: number; size: number; fill: string;
   opacity?: number; stroke?: string;
