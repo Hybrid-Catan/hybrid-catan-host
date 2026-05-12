@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setNextPlayer, setPhaseToRoll } from "@/backend/gamelogic/turnmanagement/turnmanagment";
+import { setNextPlayer, setPhaseToRoll } from "@/backend/gamelogic/turnmanagement/turnmanagement";
 import { games } from "@/app/lib/games";
 export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
@@ -7,7 +7,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const rollPhase = setPhaseToRoll(gameState);
 
         //2. Pop out the player whos turn it is and send it the last
-        const { newGameState } = setNextPlayer(rollPhase);
+        const newGameState  = setNextPlayer(rollPhase);
 
         games.set(newGameState.gameId, newGameState);
 
