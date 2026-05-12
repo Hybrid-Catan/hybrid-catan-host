@@ -1,6 +1,6 @@
 "use client";
-import { useRef, useState } from "react";
-import { createGame } from "./lib/createGame";
+import { useRef, useState, useEffect } from "react";
+import QRCode from "react-qr-code";
 
 interface MiniHexProps {
   x: number; y: number; size: number; fill: string;
@@ -103,8 +103,12 @@ export default function Host() {
   const cvStreamRef = useRef<MediaStream | null>(null);
 
   const [status, setStatus] = useState<StatusType>("idle");
-  const [logs, setLogs] = useState<LogEntry[]>([{ ts: now(), msg: "System ready — press Connect to start.", type: "info" }]);
-  const [players, setPlayers] = useState<Set<number>>(new Set());
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  useEffect(() => {
+    setLogs([{ ts: now(), msg: "System ready — press Connect to start.", type: "info" }]);
+  }, []);
+  const [players, setPlayers] = useState(0);
   const [gameId, setGameId] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -426,6 +430,22 @@ export default function Host() {
     cvStreamRef.current = cvStream;
 
     const id = `CATAN-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+
+    try {
+      const res = await fetch("/api/init/gamestate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId: id }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error ?? "Failed to register game");
+    } catch (err) {
+      addLog(`Failed to register game: ${(err as Error).message}`, "error");
+      setStatus("error");
+      rawStream.getTracks().forEach(t => t.stop());
+      return;
+    }
+
     gameIdRef.current = id;
     setGameId(id);
     addLog(`Game session created: ${id}`, "success");
@@ -523,7 +543,8 @@ export default function Host() {
   async function copyJoinLink() {
     if (!gameIdRef.current) { addLog("No active session.", "error"); return; }
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/join/${gameIdRef.current}`);
+      const playerUrl = process.env.NEXT_PUBLIC_PLAYER_URL ?? "http://localhost:3001";
+      await navigator.clipboard.writeText(`${playerUrl}/join/${gameIdRef.current}`);
       addLog("Join link copied.", "success");
     } catch { addLog("Failed to copy.", "error"); }
   }
@@ -788,6 +809,17 @@ export default function Host() {
               <p className="f-body text-[11px] text-[#6B7A99] mt-2">
                 Players enter this 5-character code. Full ID: <span className="text-[#C8861A]/70">{gameId}</span>
               </p>
+
+              <div className="mt-4 mx-auto inline-block bg-white p-3 rounded-lg">
+                <QRCode
+                  value={`${process.env.NEXT_PUBLIC_PLAYER_URL ?? "http://localhost:3001"}/join/${gameId}`}
+                  size={144}
+                  bgColor="#FFFFFF"
+                  fgColor="#000000"
+                />
+              </div>
+              <p className="f-cinzel text-[10px] text-[#6B7A99] tracking-[0.3em] uppercase mt-2">Scan to Join</p>
+
               {hasDormantSession && (
                 <div className="mt-3 px-3 py-1.5 rounded border border-yellow-500/30 bg-yellow-500/08 inline-flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />

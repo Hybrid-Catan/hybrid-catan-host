@@ -62,16 +62,20 @@ export function fulfillTrade(
 
   const players = gameState.players.map(p => {
     if (p.playerId === sender.playerId) {
+      // Sender loses what they're sending and gains what they're receiving
+      const afterGive = update(p.resourceCards, trade.sendingCards, true);
       return {
         ...p,
-        resourceCards: update(p.resourceCards, trade.sendingCards, true),
+        resourceCards: update(afterGive, trade.receivingCards, false),
       };
     }
 
     if (p.playerId === receiver.playerId) {
+      // Receiver loses what they're giving and gains what the sender sent
+      const afterGive = update(p.resourceCards, trade.receivingCards, true);
       return {
         ...p,
-        resourceCards: update(p.resourceCards, trade.receivingCards, true),
+        resourceCards: update(afterGive, trade.sendingCards, false),
       };
     }
 
