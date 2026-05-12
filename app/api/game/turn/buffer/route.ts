@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setPhaseToBuffer } from "@/backend/gamelogic/turnmanagement/turnmanagment";
+import { setPhaseToBuffer } from "@/backend/gamelogic/turnmanagement/turnmanagement";
 import { games } from "@/app/lib/games";
 export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
