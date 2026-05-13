@@ -544,7 +544,7 @@ export default function Host() {
   async function copyJoinLink() {
     if (!gameIdRef.current) { addLog("No active session.", "error"); return; }
     try {
-      const playerUrl = process.env.NEXT_PUBLIC_PLAYER_URL ?? "http://localhost:3001";
+      const playerUrl = `http://${window.location.hostname}:3001`;
       await navigator.clipboard.writeText(`${playerUrl}/join/${gameIdRef.current}`);
       addLog("Join link copied.", "success");
     } catch { addLog("Failed to copy.", "error"); }
@@ -813,7 +813,7 @@ export default function Host() {
 
               <div className="mt-4 mx-auto inline-block bg-white p-3 rounded-lg">
                 <QRCode
-                  value={`${process.env.NEXT_PUBLIC_PLAYER_URL ?? "http://localhost:3001"}/join/${gameId}`}
+                  value={`http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001/join/${gameId}`}
                   size={144}
                   bgColor="#FFFFFF"
                   fgColor="#000000"
