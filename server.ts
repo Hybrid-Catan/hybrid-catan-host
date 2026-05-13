@@ -1,6 +1,17 @@
 import { createServer } from "node:http";
 import next from "next";
 import { WebSocketServer, WebSocket } from "ws";
+import os from "node:os";
+
+function getLanIp(): string {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const net of interfaces[name] ?? []) {
+            if (net.family === "IPv4" && !net.internal) return net.address;
+        }
+    }
+    return "localhost";
+}
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -175,7 +186,8 @@ app.prepare().then(() => {
 
     httpServer
         .once("error", (err) => { console.error(err); process.exit(1); })
-        .listen(port, "0.0.0.0", () =>
-            console.log(`> Ready on http://192.168.21.11:${port}`)
-        );
+        .listen(port, "0.0.0.0", () => {
+            console.log(`> Ready on http://localhost:${port}`);
+            console.log(`> Network:  http://${getLanIp()}:${port}`);
+        });
 });

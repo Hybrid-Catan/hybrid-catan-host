@@ -111,6 +111,14 @@ export default function Host() {
   }, []);
   const [players, setPlayers] = useState<Set<number>>(new Set());
   const [gameId, setGameId] = useState<string | null>(null);
+  const [lanIp, setLanIp] = useState<string>("localhost");
+
+  useEffect(() => {
+    fetch("/api/network-info")
+      .then(r => r.json())
+      .then(d => setLanIp(d.lanIp))
+      .catch(() => {});
+  }, []);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cvSocketRef = useRef<WebSocket | null>(null);
@@ -318,7 +326,7 @@ export default function Host() {
 
   // ── Signaling + PeerConnection setup ────────────────────────────────────────
   function setupSocket(id: string, streamToShare: MediaStream) {
-    const wsUrl = process.env.NEXT_PUBLIC_HOST_WS!;
+    const wsUrl = process.env.NEXT_PUBLIC_HOST_WS ?? `ws://${window.location.hostname}:3000/ws`;
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
     addLog(`Connecting to signaling server: ${wsUrl}`, "info");
@@ -544,7 +552,7 @@ export default function Host() {
   async function copyJoinLink() {
     if (!gameIdRef.current) { addLog("No active session.", "error"); return; }
     try {
-      const playerUrl = `http://${window.location.hostname}:3001`;
+      const playerUrl = `http://${lanIp}:3001`;
       await navigator.clipboard.writeText(`${playerUrl}/join/${gameIdRef.current}`);
       addLog("Join link copied.", "success");
     } catch { addLog("Failed to copy.", "error"); }
@@ -813,7 +821,7 @@ export default function Host() {
 
               <div className="mt-4 mx-auto inline-block bg-white p-3 rounded-lg">
                 <QRCode
-                  value={`http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001/join/${gameId}`}
+                  value={`http://${lanIp}:3001/join/${gameId}`}
                   size={144}
                   bgColor="#FFFFFF"
                   fgColor="#000000"
