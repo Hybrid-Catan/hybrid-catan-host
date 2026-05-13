@@ -355,6 +355,19 @@ export default function Host() {
 
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
+        // Prefer H.264 for mobile (iOS Safari) compatibility
+        try {
+          const transceiver = pc.getTransceivers().find(t => t.sender.track?.kind === "video");
+          const caps = RTCRtpSender.getCapabilities?.("video");
+          if (transceiver && caps) {
+            const h264 = caps.codecs.filter(c => c.mimeType.toLowerCase() === "video/h264");
+            const others = caps.codecs.filter(c => c.mimeType.toLowerCase() !== "video/h264");
+            if (h264.length > 0) transceiver.setCodecPreferences([...h264, ...others]);
+          }
+        } catch (e) {
+          addLog(`Codec preference setup failed: ${(e as Error).message}`, "warn");
+        }
+
         pc.onicecandidate = (e) => {
           if (e.candidate && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: "ice", candidate: e.candidate, gameId: currentGid, playerIndex: pidx }));
