@@ -140,3 +140,35 @@ export function clearTrades(gameState: GameState): GameState {
     }
   };
 }
+
+export function bankTrade(
+  gameState: GameState,
+  senderId: UUID,
+  give: keyof resourceCards,
+  get: keyof resourceCards
+): GameState {
+  const players = gameState.players.map(p => {
+    if (p.playerId !== senderId) return p;
+    return {
+      ...p,
+      resourceCards: {
+        ...p.resourceCards,
+        [give]: p.resourceCards[give] - 4,
+        [get]: p.resourceCards[get] + 1,
+      },
+    };
+  });
+
+  return {
+    ...gameState,
+    players,
+    bank: {
+      ...gameState.bank,
+      resourceCards: {
+        ...gameState.bank.resourceCards,
+        [give]: gameState.bank.resourceCards[give] + 4,
+        [get]: gameState.bank.resourceCards[get] - 1,
+      },
+    },
+  };
+}
