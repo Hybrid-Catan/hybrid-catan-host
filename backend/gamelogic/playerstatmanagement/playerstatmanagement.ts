@@ -97,6 +97,11 @@ export function buildSettlement(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
+  if (gameState.phase === "SETUP_1" || gameState.phase === "SETUP_2") {
+    player.pieces.settlementsPlaced += 1;
+    player.victoryPoints += 1
+    return { ...gameState };
+  }
   const pieceCheck = hasPiecesRemaining(player, "SETTLEMENT");
   if (!pieceCheck.valid) {
     throw new Error(pieceCheck.reason);
