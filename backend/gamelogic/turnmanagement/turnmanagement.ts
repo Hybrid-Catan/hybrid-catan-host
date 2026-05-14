@@ -81,6 +81,8 @@ export function isLastPlayerInSetup2(gameState: GameState): boolean {
 }
 
 export function confirmSetupRoad(gameState: GameState): GameState {
+    const player = gameState.players[0]
+    player.pieces.roadsPlaced += 1
 
     if (isLastPlayerInSetup1(gameState)) {
         return setPhaseToSetup2(gameState);

@@ -8,7 +8,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const newGameState = buildSettlement(gameState);
         if (!newGameState) {
             return NextResponse.json(
-                { success: false, error: "Cannot build settlement: insufficient resources, no pieces remaining, or invalid phase" },
+                { success: false, error: "Cannot build settlement: insufficient resources" },
                 { status: 400 }
             );
         }
@@ -17,10 +17,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             { success: true, data: newGameState },
             { status: 200 }
         );
-    } catch (error) {
+    } catch (error: any) {
         return NextResponse.json(
-            { success: false, error: "Internal server error" },
-            { status: 500 }
+            { success: false, error: error.message },
+            { status: 400 }
         );
     }
 }

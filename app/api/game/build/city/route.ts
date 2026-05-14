@@ -8,7 +8,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const newGameState = buildCity(gameState);
         if (!newGameState) {
             return NextResponse.json(
-                { success: false, error: "Cannot upgrade to city: insufficient resources, no settlements to upgrade, or invalid phase" },
+                { success: false, error: "Cannot upgrade to city: insufficient resources or no settlements to upgrade" },
                 { status: 400 }
             );
         }
@@ -17,10 +17,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             { success: true, data: newGameState },
             { status: 200 }
         );
-    } catch (error) {
+    } catch (error: any) {
         return NextResponse.json(
-            { success: false, error: "Internal server error" },
-            { status: 500 }
+            { success: false, error: error.message },
+            { status: 400 }
         );
     }
 }

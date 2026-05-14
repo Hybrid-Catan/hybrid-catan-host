@@ -220,12 +220,6 @@ export function canUpgradeToCity(player: Player): RuleResult {
     const piecesLeft = hasPiecesRemaining(player, "CITY");
     if (!piecesLeft.valid) return piecesLeft;
 
-    // citiesPlaced can never exceed settlementsPlaced since cities replace settlements
-    // If they're equal, all settlements have already been upgraded — nothing left to upgrade
-    if (player.pieces.settlementsPlaced <= player.pieces.citiesPlaced) {
-        return { valid: false, reason: "No settlements available to upgrade to a city" };
-    }
-
     return { valid: true };
 }
 

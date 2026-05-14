@@ -4,7 +4,8 @@ import {
   canUpgradeToCity,
   canBuildRoad,
   canBuyDevCard,
-  calculateVictoryPoints
+  calculateVictoryPoints,
+  hasPiecesRemaining
 } from "../gamerules/gamerules.ts";
 import { getTurnPlayerId } from "../turnmanagement/turnmanagement.ts";
 
@@ -96,21 +97,19 @@ export function buildSettlement(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
-  // if (
-  //   gameState.phase !== "BUILD" &&
-  //   gameState.phase !== "SETUP_1" &&
-  //   gameState.phase !== "SETUP_2"
-  // ) {
-  //   return false;
-  // }
+  const pieceCheck = hasPiecesRemaining(player, "SETTLEMENT");
+  if (!pieceCheck.valid) {
+    throw new Error(pieceCheck.reason);
+  }
   const check = canBuildSettlement(player);
   if (!check.valid) {
     return false;
   }
-  // if (gameState.phase === "BUILD") {
-     if (!spendResources(player, SETTLEMENT_COST)) return false;
-  // }
+  if (!spendResources(player, SETTLEMENT_COST)) {
+    return false;
+  }
   player.pieces.settlementsPlaced += 1;
+  player.victoryPoints += 1
   return { ...gameState };
 }
 
@@ -119,11 +118,13 @@ export function buildCity(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
-  // if (gameState.phase !== "BUILD") {
-  //   return false;
-  // }
+  const pieceCheck = hasPiecesRemaining(player, "CITY");
+  if (!pieceCheck.valid) {
+    throw new Error(pieceCheck.reason);
+  }
   const check = canUpgradeToCity(player);
   if (!check.valid) {
+    console.log("shit")
     return false;
   }
   if (!spendResources(player, CITY_COST)) {
@@ -131,6 +132,7 @@ export function buildCity(gameState: GameState): GameState | false {
   }
   player.pieces.settlementsPlaced -= 1;
   player.pieces.citiesPlaced += 1;
+  player.victoryPoints += 1
   return { ...gameState };
 }
 
@@ -143,9 +145,10 @@ export function buildRoad(gameState: GameState): GameState | false {
     player.pieces.roadsPlaced += 1;
     return { ...gameState };
   }
-  // if (gameState.phase !== "BUILD") {
-  //   return false;
-  // }
+  const pieceCheck = hasPiecesRemaining(player, "ROAD");
+  if (!pieceCheck.valid) {
+    throw new Error(pieceCheck.reason);
+  }
   const check = canBuildRoad(player);
   if (!check.valid) {
     return false;
@@ -162,9 +165,6 @@ export function buyDevCard(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
-  // if (gameState.phase !== "BUILD") {
-  //   return false;
-  // }
   const check = canBuyDevCard(player, gameState);
   if (!check.valid) {
     return false;
