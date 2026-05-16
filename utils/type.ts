@@ -13,6 +13,26 @@ import { UUID } from "crypto";
 export type phase = "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "END";
 
 /**
+ * Resource types
+ */
+export type ResourceType =
+    | "WOOD"
+    | "BRICK"
+    | "WOOL"
+    | "WHEAT"
+    | "ORE";
+
+/**
+ * Development card types
+ */
+export type DevelopmentCardType =
+    | "KNIGHT"
+    | "MONOPOLY"
+    | "ROAD_BUILDING"
+    | "INVENTION"
+    | "VICTORY_POINT";
+
+/**
  * The result of a dice roll for the current turn.
  * sum ranges from 2–12; a sum of 7 triggers robber movement.
  */
@@ -61,6 +81,11 @@ export type Player = {
     "victoryPoints": number,
     "resourceCards": resourceCards,
     "developmentCards": developmentCards,
+    /**
+     * Dev cards bought this turn.
+     * Cannot be played until next turn.
+     */
+    "newDevelopmentCards": developmentCards;
     "pieces": {
         "settlementsPlaced": number,
         "citiesPlaced": number,
@@ -89,11 +114,11 @@ export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
     "players": Player[],// in queue
-    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD",
+    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "ROAD_BUILDING",
     "dice": {
         "sum": number
     },
-    robber: {
+    "robber": {
         tileIndex: number;
     },
     "bank": {
@@ -103,6 +128,8 @@ export type GameState = {
     "tradeState": {
         trades: trade[];
     },
+    "pendingFreeRoads": number,
+    "largestArmyPlayerId"?: string,
     "winner": {
         "playerId": UUID,
     }

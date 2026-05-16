@@ -1,5 +1,5 @@
 import { UUID } from "crypto";
-import type { GameState } from "../../../utils/type.ts";
+import type { GameState, Player, developmentCards } from "../../../utils/type.ts";
 
 export function getTurnPlayerId(gameState: GameState): UUID {
     return gameState.players[0].playerId;
@@ -56,10 +56,14 @@ export function setPhaseToBuild(gameState: GameState): GameState {
 
 export function setNextPlayer(gameState: GameState): GameState {
     const playersQueue = [...gameState.players];
-
     const currentPlayer = playersQueue.shift()!;
-    playersQueue.push(currentPlayer);
+    type DevCard = keyof developmentCards;
 
+    for (const card of Object.keys(currentPlayer.newDevelopmentCards) as DevCard[]) {
+        currentPlayer.developmentCards[card] += currentPlayer.newDevelopmentCards[card];
+        currentPlayer.newDevelopmentCards[card] = 0;
+    }
+    playersQueue.push(currentPlayer);
     return {
         ...gameState,
         players: playersQueue,

@@ -158,6 +158,14 @@ export function buildRoad(gameState: GameState): GameState | false {
   if (!check.valid) {
     return false;
   }
+  if (gameState.pendingFreeRoads > 0) {
+    player.pieces.roadsPlaced += 1;
+    gameState.pendingFreeRoads -= 1;
+    if (gameState.pendingFreeRoads === 0) {
+      gameState.phase = "BUFFER";
+    }
+    return { ...gameState };
+  }
   if (!spendResources(player, ROAD_COST)) {
     return false;
   }
@@ -165,10 +173,10 @@ export function buildRoad(gameState: GameState): GameState | false {
   return { ...gameState };
 }
 
-export function buyDevCard(gameState: GameState): GameState | false {
+export function buyDevCard(gameState: GameState) {
   const player = getCurrentPlayer(gameState);
   if (!player) {
-    return false;
+    return { success: false, error: "No current player" };
   }
   const check = canBuyDevCard(player, gameState);
   if (!check.valid) {
@@ -185,7 +193,7 @@ export function buyDevCard(gameState: GameState): GameState | false {
     return false;
   }
   bank[card] -= 1;
-  player.developmentCards[card] += 1;
+  player.developmentCards[card as DevCard] += 1;
   return { ...gameState };
 }
 
@@ -199,6 +207,68 @@ export function playKnight(gameState: GameState): GameState | false {
   }
   player.developmentCards.KNIGHT -= 1;
   player.achievements.armySize += 1;
+  updateLargestArmy(gameState);
+  return { ...gameState };
+}
+
+export function playRoadBuilding(gameState: GameState): GameState | false {
+  const player = getCurrentPlayer(gameState);
+  if (!player) {
+    return false;
+  }
+  if (player.developmentCards.ROAD_BUILDING <= 0) {
+    return false;
+  }
+  const roadsRemaining = 15 - player.pieces.roadsPlaced;
+  if (roadsRemaining <= 0) {
+    return false;
+  }
+  player.developmentCards.ROAD_BUILDING -= 1;
+  gameState.pendingFreeRoads = Math.min(2, roadsRemaining);
+  gameState.phase = "ROAD_BUILDING";
+
+  return { ...gameState };
+}
+
+export function playMonopoly(
+  gameState: GameState,
+  resource: Resource
+): GameState | false {
+  const player = getCurrentPlayer(gameState);
+  if (!player) {
+    return false;
+  }
+  if (player.developmentCards.MONOPOLY <= 0) {
+    return false;
+  }
+  player.developmentCards.MONOPOLY -= 1;
+  let total = 0;
+  for (const p of gameState.players) {
+    if (p.playerId === player.playerId) {
+      continue;
+    }
+    total += p.resourceCards[resource];
+    p.resourceCards[resource] = 0;
+  }
+  player.resourceCards[resource] += total;
+  return { ...gameState };
+}
+
+export function playInvention(
+  gameState: GameState,
+  resource1: Resource,
+  resource2: Resource
+): GameState | false {
+  const player = getCurrentPlayer(gameState);
+  if (!player) {
+    return false;
+  }
+  if (player.developmentCards.INVENTION <= 0) {
+    return false;
+  }
+  player.developmentCards.INVENTION -= 1;
+  player.resourceCards[resource1] += 1;
+  player.resourceCards[resource2] += 1;
   return { ...gameState };
 }
 
@@ -243,13 +313,23 @@ export function updateLargestArmy(gameState: GameState): GameState {
   let max = 0;
   let owner: Player | null = null;
   for (const p of gameState.players) {
-    if (p.achievements.armySize >= 3 && p.achievements.armySize > max) {
+    if (
+      p.achievements.armySize >= 3 &&
+      p.achievements.armySize > max
+    ) {
       max = p.achievements.armySize;
       owner = p;
     }
   }
   for (const p of gameState.players) {
+    const alreadyHas = p.achievements.hasLargestArmy;
     p.achievements.hasLargestArmy = p === owner;
+    if (p === owner && !alreadyHas) {
+      p.victoryPoints += 2;
+    }
+    if (p !== owner && alreadyHas) {
+      p.victoryPoints -= 2;
+    }
   }
   return { ...gameState };
 }

@@ -26,6 +26,7 @@ export function initGameState(): GameState {
         VICTORY_POINT: 5
       }
     },
+    pendingFreeRoads: 0,
     robber: {
       tileIndex: -1
     },
@@ -44,11 +45,6 @@ export function initPlayer(
   sequence: number,
   gameState: GameState
 ): GameState {
-  console.log("New GameState after adding player:");
-
-  console.log("New GameState after adding player:");
-
-
   const id = crypto.randomUUID() as UUID;
   console.log("New GameState after adding player:");
   const newPlayer: Player = {
@@ -73,7 +69,13 @@ export function initPlayer(
       INVENTION: 0,
       VICTORY_POINT: 0
     },
-
+    newDevelopmentCards: {
+      KNIGHT: 0,
+      MONOPOLY: 0,
+      ROAD_BUILDING: 0,
+      INVENTION: 0,
+      VICTORY_POINT: 0
+    },
     pieces: {
       settlementsPlaced: 0,
       citiesPlaced: 0,
