@@ -57,11 +57,9 @@ export function setPhaseToBuild(gameState: GameState): GameState {
 export function setNextPlayer(gameState: GameState): GameState {
     const playersQueue = [...gameState.players];
     const currentPlayer = playersQueue.shift()!;
-    type DevCard = keyof developmentCards;
-
-    for (const card of Object.keys(currentPlayer.newDevelopmentCards) as DevCard[]) {
-        currentPlayer.developmentCards[card] += currentPlayer.newDevelopmentCards[card];
-        currentPlayer.newDevelopmentCards[card] = 0;
+    gameState.devCardPurchasedThisTurn[currentPlayer.playerId] = false;
+    if (Object.keys(gameState.devCardPurchasedThisTurn).length === 0) {
+        gameState.devCardPurchasedThisTurn = {};
     }
     playersQueue.push(currentPlayer);
     return {

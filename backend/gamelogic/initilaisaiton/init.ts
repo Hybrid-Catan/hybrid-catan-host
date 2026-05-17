@@ -33,6 +33,7 @@ export function initGameState(): GameState {
     tradeState: {
       trades: []
     },
+    devCardPurchasedThisTurn: {},
     winner: {
       playerId: "" as UUID
     }
@@ -63,13 +64,6 @@ export function initPlayer(
     },
 
     developmentCards: {
-      KNIGHT: 0,
-      MONOPOLY: 0,
-      ROAD_BUILDING: 0,
-      INVENTION: 0,
-      VICTORY_POINT: 0
-    },
-    newDevelopmentCards: {
       KNIGHT: 0,
       MONOPOLY: 0,
       ROAD_BUILDING: 0,

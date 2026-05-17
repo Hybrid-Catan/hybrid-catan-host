@@ -190,16 +190,20 @@ export function buyDevCard(gameState: GameState) {
     (c) => bank[c] > 0
   );
   if (!card) {
-    return false;
+    return { success: false, error: "No dev cards left" };
   }
   bank[card] -= 1;
   player.developmentCards[card as DevCard] += 1;
+  gameState.devCardPurchasedThisTurn[player.playerId] = true;
   return { ...gameState };
 }
 
 export function playKnight(gameState: GameState): GameState | false {
   const player = getCurrentPlayer(gameState);
   if (!player) {
+    return false;
+  }
+  if (gameState.devCardPurchasedThisTurn?.[player.playerId]) {
     return false;
   }
   if (player.developmentCards.KNIGHT <= 0) {

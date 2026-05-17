@@ -81,11 +81,6 @@ export type Player = {
     "victoryPoints": number,
     "resourceCards": resourceCards,
     "developmentCards": developmentCards,
-    /**
-     * Dev cards bought this turn.
-     * Cannot be played until next turn.
-     */
-    "newDevelopmentCards": developmentCards;
     "pieces": {
         "settlementsPlaced": number,
         "citiesPlaced": number,
@@ -114,7 +109,7 @@ export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
     "players": Player[],// in queue
-    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "ROAD_BUILDING",
+    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "ROAD_BUILDING" | "END",
     "dice": {
         "sum": number
     },
@@ -130,6 +125,7 @@ export type GameState = {
     },
     "pendingFreeRoads": number,
     "largestArmyPlayerId"?: string,
+    "devCardPurchasedThisTurn": Record<UUID, boolean>,
     "winner": {
         "playerId": UUID,
     }
