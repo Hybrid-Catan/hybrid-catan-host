@@ -33,7 +33,6 @@ export function initGameState(): GameState {
     tradeState: {
       trades: []
     },
-    devCardPurchasedThisTurn: {},
     winner: {
       playerId: "" as UUID
     }
@@ -54,7 +53,6 @@ export function initPlayer(
     color,
     sequence,
     victoryPoints: 0,
-
     resourceCards: {
       WOOD: 20,
       BRICK: 20,
@@ -62,7 +60,6 @@ export function initPlayer(
       WHEAT: 20,
       ORE: 20
     },
-
     developmentCards: {
       KNIGHT: 0,
       MONOPOLY: 0,
@@ -70,26 +67,25 @@ export function initPlayer(
       INVENTION: 0,
       VICTORY_POINT: 0
     },
+    newDevelopmentCards: {},
+    devCardPlayedThisTurn: false,
     pieces: {
       settlementsPlaced: 0,
       citiesPlaced: 0,
       roadsPlaced: 0
     },
-
     achievements: {
       hasLongestRoad: false,
       longestRoadLength: 0,
       hasLargestArmy: false,
       armySize: 0
     },
-
     portsOwned: []
   };
 
   const players = [...gameState.players];
 
   const insertIndex = players.findIndex(p => p.sequence > sequence);
-
 
   if (insertIndex === -1) {
     players.push(newPlayer);

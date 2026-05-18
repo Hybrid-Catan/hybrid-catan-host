@@ -205,7 +205,8 @@ export function buyDevCard(gameState: GameState) {
   }
   bank[card] -= 1;
   player.developmentCards[card] += 1;
-  gameState.devCardPurchasedThisTurn[player.playerId] = true;
+  player.newDevelopmentCards[card] =
+    (player.newDevelopmentCards[card] ?? 0) + 1;
   return { ...gameState };
 }
 
@@ -214,21 +215,28 @@ export function playKnight(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
-  if (gameState.devCardPurchasedThisTurn?.[player.playerId]) {
+  if (player.devCardPlayedThisTurn) {
     return false;
   }
   if (player.developmentCards.KNIGHT <= 0) {
     return false;
   }
+  if ((player.newDevelopmentCards.KNIGHT ?? 0) > 0) {
+    return false;
+  }
   player.developmentCards.KNIGHT -= 1;
   player.achievements.armySize += 1;
   updateLargestArmy(gameState);
+  player.devCardPlayedThisTurn = true;
   return { ...gameState };
 }
 
 export function playRoadBuilding(gameState: GameState): GameState | false {
   const player = getCurrentPlayer(gameState);
   if (!player) {
+    return false;
+  }
+  if (player.devCardPlayedThisTurn) {
     return false;
   }
   if (player.developmentCards.ROAD_BUILDING <= 0) {
@@ -241,7 +249,7 @@ export function playRoadBuilding(gameState: GameState): GameState | false {
   player.developmentCards.ROAD_BUILDING -= 1;
   gameState.pendingFreeRoads = Math.min(2, roadsRemaining);
   gameState.phase = "ROAD_BUILDING";
-
+  player.devCardPlayedThisTurn = true;
   return { ...gameState };
 }
 
@@ -251,6 +259,9 @@ export function playMonopoly(
 ): GameState | false {
   const player = getCurrentPlayer(gameState);
   if (!player) {
+    return false;
+  }
+  if (player.devCardPlayedThisTurn) {
     return false;
   }
   if (player.developmentCards.MONOPOLY <= 0) {
@@ -266,6 +277,7 @@ export function playMonopoly(
     p.resourceCards[resource] = 0;
   }
   player.resourceCards[resource] += total;
+  player.devCardPlayedThisTurn = true;
   return { ...gameState };
 }
 
@@ -278,12 +290,16 @@ export function playInvention(
   if (!player) {
     return false;
   }
+  if (player.devCardPlayedThisTurn) {
+    return false;
+  }
   if (player.developmentCards.INVENTION <= 0) {
     return false;
   }
   player.developmentCards.INVENTION -= 1;
   player.resourceCards[resource1] += 1;
   player.resourceCards[resource2] += 1;
+  player.devCardPlayedThisTurn = true;
   return { ...gameState };
 }
 
