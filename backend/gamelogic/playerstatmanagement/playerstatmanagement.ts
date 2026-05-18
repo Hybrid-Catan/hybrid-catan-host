@@ -215,6 +215,9 @@ export function playKnight(gameState: GameState): GameState | false {
   if (!player) {
     return false;
   }
+  if (player.playerId !== player.playerId) {
+    return false;
+  }
   if (player.devCardPlayedThisTurn) {
     return false;
   }
@@ -234,6 +237,9 @@ export function playKnight(gameState: GameState): GameState | false {
 export function playRoadBuilding(gameState: GameState): GameState | false {
   const player = getCurrentPlayer(gameState);
   if (!player) {
+    return false;
+  }
+  if (player.playerId !== player.playerId) {
     return false;
   }
   if (player.devCardPlayedThisTurn) {
@@ -259,6 +265,9 @@ export function playMonopoly(
 ): GameState | false {
   const player = getCurrentPlayer(gameState);
   if (!player) {
+    return false;
+  }
+  if (player.playerId !== player.playerId) {
     return false;
   }
   if (player.devCardPlayedThisTurn) {
