@@ -186,14 +186,25 @@ export function buyDevCard(gameState: GameState) {
     return false;
   }
   const bank = gameState.bank.developmentCards;
-  const card = (Object.keys(bank) as DevCard[]).find(
-    (c) => bank[c] > 0
-  );
+  const cardTypes = Object.keys(bank) as DevCard[];
+  const total = cardTypes.reduce((sum, c) => sum + bank[c], 0);
+  if (total === 0) {
+    return { success: false, error: "No dev cards left" };
+  }
+  let roll = Math.floor(Math.random() * total);
+  let card: DevCard | undefined;
+  for (const c of cardTypes) {
+    if (roll < bank[c]) {
+      card = c;
+      break;
+    }
+    roll -= bank[c];
+  }
   if (!card) {
     return { success: false, error: "No dev cards left" };
   }
   bank[card] -= 1;
-  player.developmentCards[card as DevCard] += 1;
+  player.developmentCards[card] += 1;
   gameState.devCardPurchasedThisTurn[player.playerId] = true;
   return { ...gameState };
 }
