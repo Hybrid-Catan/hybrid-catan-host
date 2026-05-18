@@ -562,6 +562,13 @@ export default function Host() {
     addLog("Session disconnected. Room is inactive but code is preserved.", "warn");
   }
 
+  function handleStartGame() {
+    const id = gameIdRef.current;
+    if (!id) { addLog("No active session.", "error"); return; }
+    window.open(`http://${lanIp}:3001/join/${id}`);
+    addLog("Player lobby opened in new window.", "success");
+  }
+
   async function copyJoinLink() {
     if (!gameIdRef.current) { addLog("No active session.", "error"); return; }
     try {
@@ -762,7 +769,7 @@ export default function Host() {
             )}
             {status === "live" && (
               <>
-                <HexBtn primary>⚔️ Start Game</HexBtn>
+                <HexBtn primary onClick={handleStartGame}>⚔️ Start Game</HexBtn>
                 <HexBtn onClick={copyJoinLink}>🔗 Copy Join Link</HexBtn>
               </>
             )}

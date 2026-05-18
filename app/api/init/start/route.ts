@@ -2,21 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { games } from "@/app/lib/games";
 
 export async function POST(req: NextRequest) {
-  const { gameState } = await req.json();
+  const body = await req.json();
+  const gameId = body.gameId ?? body.gameState?.gameId;
 
-  if (!gameState) {
-    return NextResponse.json({ success: false }, { status: 400 });
+  if (!gameId) {
+    return NextResponse.json({ success: false, error: "Missing gameId" }, { status: 400 });
   }
 
-  // if (gameState.players.length < 3) {
-  //   return NextResponse.json(
-  //     {
-  //       success: false,
-  //       error: "A minimum of 3 players is required to play Catan!",
-  //     },
-  //     { status: 400 }
-  //   );
-  // }
+  const gameState = games.get(gameId);
+  if (!gameState) {
+    return NextResponse.json({ success: false, error: "Game not found" }, { status: 404 });
+  }
 
   const newState = {
     ...gameState,
@@ -24,9 +20,7 @@ export async function POST(req: NextRequest) {
     status: "IN_PROGRESS"
   };
 
-  games.set(newState.gameId, newState);
-
-  console.dir(games, { depth: null })
+  games.set(gameId, newState);
 
   return NextResponse.json({ success: true, data: newState });
 }

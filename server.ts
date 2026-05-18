@@ -39,6 +39,7 @@ app.prepare().then(() => {
         host: WebSocket | null;
         players: Map<number, WebSocket>;
         active: boolean; // true = host is connected
+        lobbyHostIndex: number | null; // playerIndex of sequence=1 player
     }
 
     // Key: gameId → Room
@@ -84,6 +85,7 @@ app.prepare().then(() => {
                             host: socket,
                             players: new Map(),
                             active: true,
+                            lobbyHostIndex: null,
                         });
                         console.log(`Host registered for room: ${gameId}`);
                     }
@@ -99,11 +101,14 @@ app.prepare().then(() => {
 
                     if (!room) {
                         // Room doesn't exist yet — player arrived before host
-                        room = { host: null, players: new Map(), active: false };
+                        room = { host: null, players: new Map(), active: false, lobbyHostIndex: null };
                         rooms.set(gameId, room);
                     }
 
                     room.players.set(data.playerIndex, socket);
+                    if (room.players.size === 1) {
+                        room.lobbyHostIndex = data.playerIndex;
+                    }
                     console.log(`Player ${data.playerIndex} joined ${gameId}`);
 
                     if (!room.active || !room.host) {
@@ -139,6 +144,18 @@ app.prepare().then(() => {
                     if (room?.host?.readyState === WebSocket.OPEN) {
                         room.host.send(msg.toString());
                     }
+                    break;
+                }
+
+                // ── GAME START ──────────────────────────────────────────────
+                case "game_start": {
+                    const room = rooms.get(gameId);
+                    if (!room) break;
+                    const isRoomHost = socket === room.host;
+                    const isLobbyHost = playerIndex !== null && playerIndex === room.lobbyHostIndex;
+                    if (!isRoomHost && !isLobbyHost) break;
+                    broadcastToPlayers(room, { type: "game_start", gameId });
+                    console.log(`Game started for room: ${gameId}`);
                     break;
                 }
 
