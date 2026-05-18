@@ -18,8 +18,8 @@ class BoardState:
     edge_colors: list        # [{cx, cy, angle, color, hex_index}]
 
 # ── Config ────────────────────────────────────────────────────────────────────
-LOWER_TEAL = np.array([ 80,  20,   0])
-UPPER_TEAL = np.array([110, 255, 255])
+LOWER_TEAL = np.array([ 100,  80,   20])
+UPPER_TEAL = np.array([255, 180, 120])
 
 PORT_COLOR_LOWER = np.array([196, 231, 243], dtype=np.uint8)
 PORT_COLOR_UPPER = np.array([255, 255, 255], dtype=np.uint8)
@@ -191,6 +191,15 @@ def detect_board_hexagon(img, hsv, h_img, w_img):
                              cv2.MORPH_CLOSE,
                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5)),
                              iterations=1)
+    # Drop small connected components — floating teal/blue pieces on the table
+    # near the board inject spurious lines that wreck the hull. Use a size
+    # floor (not just "keep largest") because the board outline often breaks
+    # into several big arcs that all need to be kept.
+    n_cc, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if n_cc > 1:
+        keep = stats[:, cv2.CC_STAT_AREA] >= 500
+        keep[0] = False  # background
+        mask = np.isin(labels, np.where(keep)[0]).astype(np.uint8) * 255
     dedup = deduplicate_lines(cv2.HoughLinesP(cv2.Canny(mask, 80, 160, apertureSize=3),
                                               1, np.pi/180, 60,
                                               minLineLength=50, maxLineGap=15))
@@ -222,19 +231,50 @@ def detect_board_hexagon(img, hsv, h_img, w_img):
         hits.sort(key=lambda h: h[0])
         for _, pt in hits: vertices.append(pt)
 
-    if len(vertices) < 6: return None
-    pts_arr  = np.array(vertices, dtype=np.float32)
-    hull_idx = cv2.convexHull(pts_arr.reshape(-1,1,2), returnPoints=False)
-    hull_pts = pts_arr[[idx[0] for idx in hull_idx]]
-    if len(hull_pts) > 6:
-        dm = cdist(hull_pts, hull_pts); used_h = [False]*len(hull_pts); merged = []
-        for i in range(len(hull_pts)):
-            if used_h[i]: continue
-            cl = np.where(dm[i] < 20)[0]; merged.append(hull_pts[cl].mean(axis=0))
-            for idx in cl: used_h[idx] = True
-        hull_pts = np.array(merged, dtype=np.float32)
-    if len(hull_pts) != 6: return None
-    return hull_pts.reshape(6,1,2).astype(np.int32)
+    def _greedy_furthest_six(pts):
+        """Pick 6 hex corners from a candidate hull using greedy furthest-from-
+        centroid with a 25° angular separation guard. Returns None if 6 corners
+        can't be picked."""
+        centroid = pts.mean(axis=0)
+        deltas = pts - centroid
+        angs = np.arctan2(deltas[:, 1], deltas[:, 0])
+        dists = np.linalg.norm(deltas, axis=1)
+        MIN_SEP = np.deg2rad(25)
+        picked = []
+        for idx in np.argsort(-dists):
+            ang = angs[idx]
+            ok = True
+            for p in picked:
+                da = abs(ang - angs[p])
+                if min(da, 2 * np.pi - da) < MIN_SEP:
+                    ok = False; break
+            if ok:
+                picked.append(idx)
+                if len(picked) == 6: break
+        return pts[picked] if len(picked) == 6 else None
+
+    # Primary path: pick 6 corners from line-intersection candidates. Line
+    # intersections triangulate to true corner positions much more accurately
+    # than raw contour points.
+    if len(vertices) >= 6:
+        pts_arr  = np.array(vertices, dtype=np.float32)
+        hull_idx = cv2.convexHull(pts_arr.reshape(-1,1,2), returnPoints=False)
+        hull_pts = pts_arr[[idx[0] for idx in hull_idx]]
+        picked = _greedy_furthest_six(hull_pts) if len(hull_pts) >= 6 else None
+        if picked is not None and len(picked) == 6:
+            return picked.reshape(6,1,2).astype(np.int32)
+
+    # Fallback: when the outline is broken on one side, line intersections miss
+    # that corner entirely. Use the mask's outer contour hull instead — every
+    # visible corner is in there even if Hough never linked them.
+    contour_cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not contour_cnts: return None
+    combined = np.vstack(contour_cnts)
+    contour_hull = cv2.convexHull(combined).reshape(-1, 2).astype(np.float32)
+    picked = _greedy_furthest_six(contour_hull) if len(contour_hull) >= 6 else None
+    if picked is not None and len(picked) == 6:
+        return picked.reshape(6,1,2).astype(np.int32)
+    return None
 
 # ── Tile helpers ──────────────────────────────────────────────────────────────
 def hex_mask_fn(cx, cy, r, shape):
@@ -280,6 +320,18 @@ def classify_color(bgr_tuple, kind):
             return label, PLAYER_DRAW_COLORS[label]
     return None, None
 
+def classify_sample(raw_bgr, kind):
+    """Saturation-gated classification: only treat a sample as a player piece
+    if the *raw* sample is genuinely saturated. _boost() amplifies muted tile
+    tones into confident-looking orange/red, so always classifying the boosted
+    color produces false positives on plain board pixels."""
+    raw_hsv = cv2.cvtColor(np.array([[raw_bgr]], dtype=np.uint8),
+                            cv2.COLOR_BGR2HSV)[0, 0]
+    if raw_hsv[1] < 130:
+        return None
+    lbl, _ = classify_color(_boost(raw_bgr), kind)
+    return lbl
+
 def avg_bgr_region(img, mask):
     ys, xs = np.where(mask == 255)
     if len(xs) == 0: return (128, 128, 128)
@@ -293,6 +345,25 @@ def avg_bgr_region(img, mask):
     tw = w.sum()
     if tw < 1e-6: return (128, 128, 128)
     return tuple(int(v) for v in ((px * w[:,None]).sum(axis=0) / tw))
+
+def saturated_pixel_mean(img, mask, sat_min=150, min_frac=0.40):
+    """Mean BGR of only the saturated pixels inside `mask`. Returns None when
+    fewer than `min_frac` of the masked pixels are saturated above `sat_min`.
+    Lets us tell "this sample contains a player piece" from "this sample is
+    just tile background" — the latter has almost no saturated pixels even if
+    a few stray bright pixels would otherwise drag a weighted mean toward a
+    road-like color."""
+    ys, xs = np.where(mask == 255)
+    if len(xs) == 0: return None
+    bgr_pixels = img[ys, xs]
+    if bgr_pixels.size == 0: return None
+    hsv_pixels = cv2.cvtColor(bgr_pixels.reshape(-1, 1, 3),
+                               cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    sat = hsv_pixels[:, 1]
+    keep = sat >= sat_min
+    if keep.sum() < max(3, int(min_frac * len(bgr_pixels))):
+        return None
+    return tuple(int(v) for v in bgr_pixels[keep].mean(axis=0))
 
 # ── Board drawing ─────────────────────────────────────────────────────────────
 def draw_board(final_hex_crop, tile_results, R, H, W):
@@ -390,11 +461,31 @@ def draw_vertices_edges(overlay, final_hex_crop, tile_results, R, H, W):
 
 # ── Robber detection ──────────────────────────────────────────────────────────
 def detect_robber(img, tile_results, R):
-    mask = cv2.morphologyEx(cv2.inRange(img, ROBBER_LOWER, ROBBER_UPPER),
-                            cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
+    # Restrict search to tile interiors only. Roads sit on tile boundaries and
+    # settlements on vertices — both produce dark blobs the old detector would
+    # snap to the nearest tile and report as a robber. The interior mask
+    # (~0.5*R radius hex per tile) covers where a real robber actually sits
+    # and excludes shadows that leak in from edge pieces.
+    H, W = img.shape[:2]
+    interior_mask = np.zeros((H, W), dtype=np.uint8)
+    for _, _, tx, ty, _ in tile_results:
+        pts = np.array([[int(tx + R * 0.5 * np.cos(np.radians(30 + i*60))),
+                         int(ty + R * 0.5 * np.sin(np.radians(30 + i*60)))]
+                         for i in range(6)], dtype=np.int32)
+        cv2.fillPoly(interior_mask, [pts], 255)
+    raw = cv2.morphologyEx(cv2.inRange(img, ROBBER_LOWER, ROBBER_UPPER),
+                           cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
+    mask = cv2.bitwise_and(raw, raw, mask=interior_mask)
+
+    # Scale min-area with tile size so it adapts if the warp canvas changes.
+    # 0.05 * R^2 ≈ 280px for R≈75 — comfortably below real-robber blob sizes
+    # (350-400px on our fixtures) and above shadow/feature noise (≤290px).
+    MIN_AREA = int(0.05 * R * R)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours: return None
-    valid = [c for c in contours if cv2.contourArea(c) < 2.6*R*R*ROBBER_MAX_AREA_FRAC]
+    area_cap = 2.6 * R * R * ROBBER_MAX_AREA_FRAC
+    valid = [c for c in contours
+             if MIN_AREA <= cv2.contourArea(c) < area_cap]
     if not valid: return None
     M = cv2.moments(max(valid, key=cv2.contourArea))
     if M["m00"] == 0: return None
@@ -403,6 +494,11 @@ def detect_robber(img, tile_results, R):
     for _, _, tx, ty, _ in tile_results:
         d = np.hypot(rx-tx, ry-ty)
         if d < md: md = d; best = (tx, ty)
+    # The robber pawn sits near tile centre. Real fixtures show 3-10px offset;
+    # anything past 30% of R is almost certainly a shadow/feature being snapped
+    # to the wrong tile.
+    if best is None or md > R * 0.3:
+        return None
     return best, (rx, ry)
 
 # ── Number placement ──────────────────────────────────────────────────────────
@@ -658,13 +754,25 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
 
     try:
         center      = np.mean(hex_points, axis=0)[0]
-        sorted_hex  = sorted(hex_points,
-                             key=lambda p: np.arctan2(p[0][1]-center[1], p[0][0]-center[0]))
+        # Sort corners clockwise from "top" instead of by raw atan2. atan2's
+        # discontinuity is at the horizontal-left direction, which is right
+        # where a flat-top hex has its LEFT corner — tiny camera tilt flips
+        # that corner between first and last in sort order, rotating the
+        # entire warp by 60° across frames. Measuring CW from straight up
+        # puts the discontinuity at the (cornerless) top centreline instead.
+        def _cw_from_top(p):
+            dx, dy = p[0][0] - center[0], p[0][1] - center[1]
+            a = np.arctan2(dx, -dy)
+            return a if a >= 0 else a + 2 * np.pi
+        sorted_hex  = sorted(hex_points, key=_cw_from_top)
         src_pts     = np.array(sorted_hex).reshape(6, 2).astype(np.float32)
         size        = 440
+        # dst angles matched to the CW-from-top order: src[0] is TOP-RIGHT,
+        # which corresponds to dst angle 300° in image coords (math y flipped).
         dst_pts     = np.array([[size + size*np.cos(np.radians(a)),
                                   size + size*np.sin(np.radians(a))]
-                                 for a in range(0, 360, 60)], dtype=np.float32)
+                                 for a in [300, 0, 60, 120, 180, 240]],
+                               dtype=np.float32)
         matrix, _   = cv2.findHomography(src_pts, dst_pts)
         canvas_size = size * 2
         rectified   = cv2.warpPerspective(orig_eq, matrix, (canvas_size, canvas_size))
@@ -738,8 +846,12 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 None
             )
 
-        # Vertex and edge color samples
+        # Vertex and edge color samples. Adjacent hexes share vertices/edges,
+        # so dedupe by rounded position — otherwise each shared edge appears
+        # twice and each shared vertex up to three times.
+        DEDUP_TOL = 8
         vertex_list, edge_list = [], []
+        vertex_seen, edge_seen = {}, {}
         for _, _, tx, ty, _ in tile_results:
             hex_idx = next(
                 (bt["spiralIndex"] for bt in board_tiles
@@ -749,11 +861,18 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
             for i in range(6):
                 a  = np.deg2rad(30 + i * 60)
                 vx, vy = int(tx + R * np.cos(a)), int(ty + R * np.sin(a))
+                key = (round(vx / DEDUP_TOL), round(vy / DEDUP_TOL))
                 sm = np.zeros((H, W), dtype=np.uint8)
                 cv2.circle(sm, (vx, vy), 4, 255, -1)
-                raw = avg_bgr_region(final_hex_crop, sm)
-                lbl, _ = classify_color(_boost(raw), "triangle")
-                vertex_list.append({"cx": vx, "cy": vy, "hexIndex": hex_idx, "color": lbl})
+                sat_mean = saturated_pixel_mean(final_hex_crop, sm)
+                lbl = classify_sample(sat_mean, "triangle") if sat_mean else None
+                if key in vertex_seen:
+                    existing = vertex_list[vertex_seen[key]]
+                    if existing["color"] is None and lbl is not None:
+                        existing["color"] = lbl
+                else:
+                    vertex_seen[key] = len(vertex_list)
+                    vertex_list.append({"cx": vx, "cy": vy, "hexIndex": hex_idx, "color": lbl})
 
             for i in range(6):
                 a0 = np.deg2rad(30 + i * 60);       a1 = np.deg2rad(30 + (i + 1) * 60)
@@ -761,13 +880,20 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 vx1, vy1 = tx + R * np.cos(a1), ty + R * np.sin(a1)
                 mx, my   = int((vx0 + vx1) / 2),   int((vy0 + vy1) / 2)
                 ea       = float(np.degrees(np.arctan2(vy1 - vy0, vx1 - vx0)))
+                key = (round(mx / DEDUP_TOL), round(my / DEDUP_TOL))
                 sm       = np.zeros((H, W), dtype=np.uint8)
                 cv2.fillPoly(sm, [cv2.boxPoints(
                     ((float(mx), float(my)), (24., 8.), ea)).astype(np.int32)], 255)
-                raw = avg_bgr_region(final_hex_crop, sm)
-                lbl, _ = classify_color(_boost(raw), "rect")
-                edge_list.append({"cx": mx, "cy": my, "angle": round(ea, 1),
-                                   "hexIndex": hex_idx, "color": lbl})
+                sat_mean = saturated_pixel_mean(final_hex_crop, sm)
+                lbl = classify_sample(sat_mean, "rect") if sat_mean else None
+                if key in edge_seen:
+                    existing = edge_list[edge_seen[key]]
+                    if existing["color"] is None and lbl is not None:
+                        existing["color"] = lbl
+                else:
+                    edge_seen[key] = len(edge_list)
+                    edge_list.append({"cx": mx, "cy": my, "angle": round(ea, 1),
+                                       "hexIndex": hex_idx, "color": lbl})
 
         port_list = []
         for cx, cy, port_label, _, _ in port_results:
