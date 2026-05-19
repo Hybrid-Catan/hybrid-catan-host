@@ -118,7 +118,7 @@ export default function Host() {
     fetch("/api/network-info")
       .then(r => r.json())
       .then(d => setLanIp(d.lanIp))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -233,7 +233,7 @@ export default function Host() {
       setCvStatus("processing");
     };
 
-    cvSocket.onmessage = (e) => {
+    cvSocket.onmessage = async (e) => {
       // The Python server sends two messages per frame:
       //   1st → JPEG bytes (ArrayBuffer)
       //   2nd → JSON board state (ArrayBuffer containing UTF-8 text)
@@ -271,6 +271,16 @@ export default function Host() {
             setCvStatus("error");
           } else {
             let bs: CVBoardState = parseBoardState(state)
+            await fetch("/api/game/update-cv", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                gameId: gameIdRef.current,
+                cvBoardState: bs,
+              }),
+            });
             addLog(bs.edge_colors?.map(e => e?.color?.toString()).toString() ?? "null", "warn")
             logCvState(state);
             setCvStatus("processing");
