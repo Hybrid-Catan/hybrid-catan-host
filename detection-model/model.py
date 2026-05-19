@@ -18,8 +18,8 @@ class BoardState:
     edge_colors: list        # [{cx, cy, angle, color, hex_index}]
 
 # ── Config ────────────────────────────────────────────────────────────────────
-LOWER_TEAL = np.array([ 80,  20,   0])
-UPPER_TEAL = np.array([110, 255, 255])
+LOWER_TEAL = np.array([ 92,  120, 80])
+UPPER_TEAL = np.array([200, 255, 255])
 
 PORT_COLOR_LOWER = np.array([196, 231, 243], dtype=np.uint8)
 PORT_COLOR_UPPER = np.array([255, 255, 255], dtype=np.uint8)

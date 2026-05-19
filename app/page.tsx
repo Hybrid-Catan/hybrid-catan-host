@@ -2,6 +2,7 @@
 import { useRef, useState, useEffect } from "react";
 import { createGame } from "./lib/createGame"
 import QRCode from "react-qr-code";
+import { parseBoardState, CVBoardState } from "@/utils/boardState"
 
 interface MiniHexProps {
   x: number; y: number; size: number; fill: string;
@@ -269,6 +270,8 @@ export default function Host() {
           } else if (state.error) {
             setCvStatus("error");
           } else {
+            let bs: CVBoardState = parseBoardState(state)
+            addLog(bs.edge_colors?.map(e => e?.color?.toString()).toString() ?? "null", "warn")
             logCvState(state);
             setCvStatus("processing");
           }
