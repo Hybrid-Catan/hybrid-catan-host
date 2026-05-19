@@ -1,5 +1,6 @@
 import { UUID } from "crypto";
 import type { GameState, Player } from "../../../utils/type.ts";
+import { CVBoardState } from "@/utils/boardState.ts";
 
 export function initGameState(): GameState {
   return {
@@ -35,7 +36,8 @@ export function initGameState(): GameState {
     },
     winner: {
       playerId: "" as UUID
-    }
+    },
+    cvBoardState: {} as CVBoardState
   };
 }
 

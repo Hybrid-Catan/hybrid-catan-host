@@ -1,4 +1,5 @@
 import { UUID } from "crypto";
+import { CVBoardState } from "./boardState";
 
 
 /**
@@ -130,6 +131,7 @@ export type GameState = {
     "winner": {
         "playerId": UUID,
     }
+    "cvBoardState": CVBoardState;
 }
 export type PlayerToResourceMap = {
     [playerId: string]: resourceCards;
