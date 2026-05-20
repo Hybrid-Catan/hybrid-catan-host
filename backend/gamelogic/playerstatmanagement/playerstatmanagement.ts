@@ -56,26 +56,69 @@ const DEV_COST = {
   ORE: 1,
 };
 
-export function distributeResource(
-  gameState: GameState,
-  resourceMap: Record<string, Partial<Record<Resource, number>>>
-): GameState {
-  const newPlayers = gameState.players.map((player) => {
-    const playerResources = resourceMap[player.playerId];
-    if (!playerResources) return player;
-    const updatedResourceCards = { ...player.resourceCards };
-    for (const resource in playerResources) {
-      const amount = playerResources[resource as Resource] || 0;
-      updatedResourceCards[resource as Resource] += amount;
+export function distributeResource(gameState: any, cvBoardState: any) {
+  const roll = gameState.dice.sum;
+  // Get tiles activated by dice roll
+  const activeTiles = cvBoardState.tile_results.filter(
+    (tile: any) =>
+      tile.number === roll &&
+      tile.resource &&
+      tile.resource !== "Water" &&
+      tile.resource !== "Desert"
+  );
+  if (!activeTiles.length) {
+    return gameState;
+  }
+  // Map resource types (CV → Game resource)
+  const RESOURCE_MAP: Record<string, keyof any> = {
+    Field: "WOOD",
+    Forest: "WOOD",
+    Mountain: "ORE",
+    Pasture: "WOOL",
+    Hill: "BRICK",
+  };
+  const bankDeduction = {
+    WOOD: 0,
+    BRICK: 0,
+    WOOL: 0,
+    WHEAT: 0,
+    ORE: 0,
+  };
+  // Loop through settlements/cities
+  const updatedPlayers = gameState.players.map((player: any) => {
+    const updatedResources = { ...player.resources };
+    // find all vertices owned by this player
+    const ownedVertices = cvBoardState.vertex_colors.filter(
+      (v: any) => v.color === player.color
+    );
+    for (const vertex of ownedVertices) {
+      const tile = activeTiles.find(
+        (t: any) => t.spiralIndex === vertex.hexIndex
+      );
+      if (!tile) {
+        continue;
+      }
+      const resourceKey = RESOURCE_MAP[tile.resource];
+      if (!resourceKey) {
+        continue;
+      }
+      // settlement = +1 resource (extend later for cities)
+      updatedResources[resourceKey] += 1;
     }
     return {
       ...player,
-      resourceCards: updatedResourceCards,
+      resources: updatedResources,
     };
   });
+  gameState.bank.resourceCards.WOOD -= bankDeduction.WOOD;
+  gameState.bank.resourceCards.BRICK -= bankDeduction.BRICK;
+  gameState.bank.resourceCards.WOOL -= bankDeduction.WOOL;
+  gameState.bank.resourceCards.WHEAT -= bankDeduction.WHEAT;
+  gameState.bank.resourceCards.ORE -= bankDeduction.ORE;
+  // Return updated game state
   return {
     ...gameState,
-    players: newPlayers,
+    players: updatedPlayers,
   };
 }
 
@@ -110,9 +153,14 @@ export function buildSettlement(gameState: GameState): GameState | false {
   if (!check.valid) {
     return false;
   }
-  if (!spendResources(player, SETTLEMENT_COST)) {
+  const cost = { ...SETTLEMENT_COST };
+  if (!spendResources(player, cost)) {
     return false;
   }
+  gameState.bank.resourceCards.WOOD += cost.WOOD;
+  gameState.bank.resourceCards.BRICK += cost.BRICK;
+  gameState.bank.resourceCards.WOOL += cost.WOOL;
+  gameState.bank.resourceCards.WHEAT += cost.WHEAT;
   player.pieces.settlementsPlaced += 1;
   player.victoryPoints += 1
   return { ...gameState };
@@ -132,9 +180,12 @@ export function buildCity(gameState: GameState): GameState | false {
     console.log("shit")
     return false;
   }
-  if (!spendResources(player, CITY_COST)) {
+  const cost = { ...CITY_COST };
+  if (!spendResources(player, cost)) {
     return false;
   }
+  gameState.bank.resourceCards.WHEAT += cost.WHEAT;
+  gameState.bank.resourceCards.ORE += cost.ORE;
   player.pieces.settlementsPlaced -= 1;
   player.pieces.citiesPlaced += 1;
   player.victoryPoints += 1
@@ -166,9 +217,12 @@ export function buildRoad(gameState: GameState): GameState | false {
     }
     return { ...gameState };
   }
-  if (!spendResources(player, ROAD_COST)) {
+  const cost = { ...ROAD_COST };
+  if (!spendResources(player, cost)) {
     return false;
   }
+  gameState.bank.resourceCards.WOOD += cost.WOOD;
+  gameState.bank.resourceCards.BRICK += cost.BRICK;
   player.pieces.roadsPlaced += 1;
   return { ...gameState };
 }
@@ -182,9 +236,13 @@ export function buyDevCard(gameState: GameState) {
   if (!check.valid) {
     return false;
   }
-  if (!spendResources(player, DEV_COST)) {
+  const cost = { ...DEV_COST };
+  if (!spendResources(player, cost)) {
     return false;
   }
+  gameState.bank.resourceCards.WOOD += cost.WHEAT;
+  gameState.bank.resourceCards.BRICK += cost.ORE;
+  gameState.bank.resourceCards.WOOL += cost.WOOL;
   const bank = gameState.bank.developmentCards;
   const cardTypes = Object.keys(bank) as DevCard[];
   const total = cardTypes.reduce((sum, c) => sum + bank[c], 0);

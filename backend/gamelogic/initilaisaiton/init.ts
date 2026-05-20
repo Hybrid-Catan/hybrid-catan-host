@@ -63,11 +63,11 @@ export function initPlayer(
     sequence,
     victoryPoints: 0,
     resourceCards: {
-      WOOD: 20,
-      BRICK: 20,
-      WOOL: 20,
-      WHEAT: 20,
-      ORE: 20
+      WOOD: 0,
+      BRICK: 0,
+      WOOL: 0,
+      WHEAT: 0,
+      ORE: 0
     },
     developmentCards: {
       KNIGHT: 0,

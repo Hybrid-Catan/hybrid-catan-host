@@ -23,7 +23,7 @@ export type CVBoardState = {
 };
 
 // CV color string → game player color
-const CV_TO_GAME_COLOR: Record<string, string> = {
+export const CV_TO_GAME_COLOR: Record<string, string> = {
     orange: "ORANGE", red: "RED", blue: "BLUE", white: "WHITE",
 };
 

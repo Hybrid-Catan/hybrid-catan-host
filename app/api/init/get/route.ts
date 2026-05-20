@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  console.dir(games, { depth: null })
+  // console.dir(games, { depth: null })
 
   return NextResponse.json({
     success: true,
