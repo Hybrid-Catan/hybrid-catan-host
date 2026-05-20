@@ -11,7 +11,7 @@ export async function POST(req: Request) {
   let newGameState = {
     ...gameState,
     phase: "BUFFER",
-    dice: { sum },
+    dice: { sum, d1, d2 },
   };
   const tileMap = new Map<number, any>(
     boardState.tile_results.map((t: any) => [t.spiralIndex, t])
