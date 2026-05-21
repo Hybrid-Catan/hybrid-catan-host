@@ -77,7 +77,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-FRAME_BUFFER_SIZE    = 30   # frames kept for majority-vote stable state
+FRAME_BUFFER_SIZE    = 30    # frames kept for majority-vote stable state
 
 # FIX 3: SAT_BOOST / VAL_BOOST moved to module level so _boost() can use them
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
@@ -133,7 +133,7 @@ def tf_classify_tile(avg_bgr_np):
         if tf.reduce_all((avg_tf >= tf.constant(lo, dtype=tf.float32)) &
                          (avg_tf <= tf.constant(hi, dtype=tf.float32))):
             return name
-    return "Water"
+    return "Desert"
 
 def tf_hist_correlation(crop_hsv, tmpl_hsv, crop_mask, tmpl_mask):
     h_bins, s_bins = 50, 60
@@ -308,7 +308,7 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
             tx = int(row_start_x + t_idx * col_spacing)
             ty = int(row_y)
             pixels = get_pixels(tx, ty)
-            res = tf_classify_tile(np.mean(pixels, axis=0).astype(int)) if len(pixels) else "Water"
+            res = tf_classify_tile(np.mean(pixels, axis=0).astype(int)) if len(pixels) else "Desert"
             tile_results.append((row_idx, t_idx, tx, ty, res))
     return tile_results
 
@@ -1055,7 +1055,7 @@ def compute_majority_state(buffer: list) -> dict:
 # ── WebSocket server ──────────────────────────────────────────────────────────
 # FIX 5: duplicate/broken handler removed; single clean handler below
 async def cv_handler(websocket):
-    # Only valid frames enter this buffer; majority is computed once it is full.
+    # All successfully-processed frames enter this buffer (validation skipped for testing).
     valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
     print(f"[CV] Client connected: {websocket.remote_address}")
     try:
@@ -1065,8 +1065,7 @@ async def cv_handler(websocket):
                 await websocket.send(processed)
                 # Always send JSON second message so client toggle stays in sync
                 if status == "ok":
-                    if is_valid_board_state(state):
-                        valid_buffer.append(state)
+                    valid_buffer.append(state)
                     n = len(valid_buffer)
                     full = (n == FRAME_BUFFER_SIZE)
                     majority: dict = {
