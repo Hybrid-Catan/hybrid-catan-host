@@ -8,6 +8,7 @@ from scipy.spatial.distance import cdist
 import json
 from dataclasses import dataclass, asdict
 from typing import Optional
+from collections import deque, Counter
 
 @dataclass
 class BoardState:
@@ -36,13 +37,14 @@ PORT_COLORS = {
 }
 
 RESOURCES_BGR = {
-    "Pasture":  (np.array([55, 130, 120]), np.array([115, 185, 175])),
-    "Mountain": (np.array([60,  75,  80]), np.array([120, 130, 135])),
-    "Field":    (np.array([30, 120, 155]), np.array([100, 170, 195])),
-    "Hills":    (np.array([30,  60,  95]), np.array([ 80, 110, 160])),
-    "Forest":   (np.array([25,  55,  35]), np.array([ 80, 110,  85])),
-    "Desert":   (np.array([95, 150, 165]), np.array([145, 190, 205])),
+    "Hills": (np.array([20, 50, 113]), np.array([70, 95, 150])),
+    "Forest": (np.array([30, 65, 30]), np.array([60, 95, 60])),
+    "Pasture": (np.array([35, 145, 120]), np.array([75, 185, 165])),
+    "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),
+    "Desert": (np.array([75, 150, 170]), np.array([115, 180, 240])),
+    "Field": (np.array([30, 105, 140]), np.array([75, 145, 205])),
 }
+
 RESOURCE_DRAW_COLORS = {
     "Pasture":  ( 80, 180,  80),
     "Field":    ( 30, 200, 220),
@@ -76,6 +78,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
+FRAME_BUFFER_SIZE    = 10    # frames kept for majority-vote stable state
 
 # FIX 3: SAT_BOOST / VAL_BOOST moved to module level so _boost() can use them
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
@@ -131,7 +134,16 @@ def tf_classify_tile(avg_bgr_np):
         if tf.reduce_all((avg_tf >= tf.constant(lo, dtype=tf.float32)) &
                          (avg_tf <= tf.constant(hi, dtype=tf.float32))):
             return name
-    return "Water"
+    # No exact range match — fall back to nearest neighbour by midpoint distance
+    avg_f = avg_bgr_np.astype(np.float32)
+    best_name, best_dist = "Desert", float('inf')
+    for name, (lo, hi) in RESOURCES_BGR.items():
+        mid  = (lo.astype(np.float32) + hi.astype(np.float32)) / 2
+        dist = float(np.linalg.norm(avg_f - mid))
+        if dist < best_dist:
+            best_dist = dist
+            best_name = name
+    return best_name
 
 def tf_hist_correlation(crop_hsv, tmpl_hsv, crop_mask, tmpl_mask):
     h_bins, s_bins = 50, 60
@@ -306,19 +318,9 @@ def enhance_tile_contrast(img_bgr: np.ndarray) -> np.ndarray:
 
     return img_sharp
 
-RESOURCES_BGR = {
-    "Hill": (np.array([20, 50, 113]), np.array([70, 95, 150])),       #
-    "Forest": (np.array([30, 65, 35]), np.array([60, 95, 60])),  #
-    "Pasture": (np.array([40, 145, 120]), np.array([75, 185, 165])), #
-    "Mountain": (np.array([60, 70, 85]), np.array([95, 95, 105])),#
-    "Desert": (np.array([103, 165, 185]), np.array([115, 180, 240])), #
-    "Field": (np.array([30, 105, 150]), np.array([75, 145, 205])), 
-}
 
-i = 0
 
 def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
-    global i
     num_rows    = len(tile_layout)
     col_spacing = R * np.sqrt(3)
     row_spacing = R * 1.5
@@ -328,22 +330,6 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
         hex_m = hex_mask_fn(tx, ty, R * 0.82, (H, W))
         return bgr_full[hex_m == 255], hex_m
 
-    def classify_hex(tx, ty):
-        pixels_bgr, _ = get_pixels(tx, ty)
-        if len(pixels_bgr) == 0:
-            return "Unknown"
-
-        avg = pixels_bgr.mean(axis=0)
-        dom_h, dom_s, dom_v = float(avg[0]), float(avg[1]), float(avg[2])
-
-        for name, (lo, hi) in RESOURCES_BGR.items():
-            if (lo[0] <= dom_h <= hi[0] and
-                    lo[1] <= dom_s <= hi[1] and
-                    lo[2] <= dom_v <= hi[2]):
-                return f"{name[:2]}"
-
-        return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
-
     tile_results = []
     for row_idx, num_tiles in enumerate(tile_layout):
         row_y       = cy0 + (row_idx - (num_rows - 1) / 2) * row_spacing
@@ -351,7 +337,9 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
         for t_idx in range(num_tiles):
             tx = int(row_start_x + t_idx * col_spacing)
             ty = int(row_y)
-            tile_results.append((row_idx, t_idx, tx, ty, classify_hex(tx, ty)))
+            pixels, _ = get_pixels(tx, ty)
+            res = tf_classify_tile(np.mean(pixels, axis=0).astype(int)) if len(pixels) else "Desert"
+            tile_results.append((row_idx, t_idx, tx, ty, res))
     return tile_results
 
 # ── Player colour ─────────────────────────────────────────────────────────────
@@ -569,13 +557,13 @@ def place_numbers(overlay, tile_results, R):
         if number is None: continue
         label = str(number)
         col   = (0,0,220) if number in [6,8] else (20,20,20)
-        cv2.circle(final_board, (tx,ty), int(R*0.28), (230,225,200), -1)
-        cv2.circle(final_board, (tx,ty), int(R*0.28), (120,110,80),   1)
+        # cv2.circle(final_board, (tx,ty), int(R*0.28), (230,225,200), -1)
+        # cv2.circle(final_board, (tx,ty), int(R*0.28), (120,110,80),   1)
         scale = 0.55 if number >= 10 else 0.65
         (tw,th),_ = cv2.getTextSize(label, FONT, scale, 2)
         org = (tx-tw//2, ty+th//2)
-        cv2.putText(final_board, label, org, FONT, scale, (0,0,0), 3, cv2.LINE_AA)
-        cv2.putText(final_board, label, org, FONT, scale, col,     1, cv2.LINE_AA)
+        # cv2.putText(final_board, label, org, FONT, scale, (0,0,0), 3, cv2.LINE_AA)
+        # cv2.putText(final_board, label, org, FONT, scale, col,     1, cv2.LINE_AA)
     return final_board
 
 # ── Port detection ────────────────────────────────────────────────────────────
@@ -1001,9 +989,116 @@ def test_image(image_path: str, output_path: str = "test_output.jpg"):
     print(f"Status: {status}")
     print(f"Output saved to: {output_path}")
 
+# ── Valid board state filter ──────────────────────────────────────────────────
+VALID_RESOURCE_COUNTS = {"Forest": 4, "Pasture": 4, "Field": 4, "Hills": 3, "Mountain": 3, "Desert": 1}
+
+
+def is_valid_board_state(state: dict) -> bool:
+    """Return True only when the 19 detected tiles match the standard Catan distribution."""
+    tiles = state.get("tile_results", [])
+    if len(tiles) != 19:
+        return False
+    counts = Counter(t.get("resource") for t in tiles)
+    return all(counts.get(res, 0) == n for res, n in VALID_RESOURCE_COUNTS.items())
+
+
+def compute_majority_state(buffer: list) -> dict:
+    """Elect the most common complete board layout from a buffer of pre-validated states.
+    All frames in the buffer have already passed is_valid_board_state."""
+
+    # Elect the most common complete board layout
+    config_votes: Counter = Counter()
+    config_state: dict = {}
+    for state in buffer:
+        tiles = sorted(state.get("tile_results", []), key=lambda t: t.get("spiralIndex", 0))
+        key = tuple(t.get("resource") for t in tiles)
+        config_votes[key] += 1
+        config_state[key] = state
+
+    best_key = config_votes.most_common(1)[0][0]
+    best_tiles = config_state[best_key].get("tile_results", [])
+
+    # Majority-vote dynamic fields across all frames in the buffer
+    robber_votes: Counter = Counter(
+        s.get("robber_tile_index")
+        for s in buffer
+        if s.get("robber_tile_index") is not None
+    )
+    majority_robber = robber_votes.most_common(1)[0][0] if robber_votes else None
+
+    vertex_votes: dict = {}
+    vertex_meta: dict = {}
+    for state in buffer:
+        for v in state.get("vertex_colors", []):
+            key = (round(v["cx"] / 8) * 8, round(v["cy"] / 8) * 8)
+            if key not in vertex_votes:
+                vertex_votes[key] = Counter()
+            vertex_votes[key][v.get("color")] += 1
+            vertex_meta[key] = v
+    majority_vertices = []
+    for key, votes in vertex_votes.items():
+        meta = dict(vertex_meta[key])
+        meta["color"] = votes.most_common(1)[0][0]
+        majority_vertices.append(meta)
+
+    edge_votes: dict = {}
+    edge_meta: dict = {}
+    for state in buffer:
+        for e in state.get("edge_colors", []):
+            key = (round(e["cx"] / 8) * 8, round(e["cy"] / 8) * 8)
+            if key not in edge_votes:
+                edge_votes[key] = Counter()
+            edge_votes[key][e.get("color")] += 1
+            edge_meta[key] = e
+    majority_edges = []
+    for key, votes in edge_votes.items():
+        meta = dict(edge_meta[key])
+        meta["color"] = votes.most_common(1)[0][0]
+        majority_edges.append(meta)
+
+    port_votes: dict = {}
+    port_meta: dict = {}
+    for state in buffer:
+        for p in state.get("port_results", []):
+            key = (round(p["cx"] / 20) * 20, round(p["cy"] / 20) * 20)
+            if key not in port_votes:
+                port_votes[key] = Counter()
+            port_votes[key][p.get("label", "3:1")] += 1
+            port_meta[key] = p
+    majority_ports = []
+    for key, votes in port_votes.items():
+        label = votes.most_common(1)[0][0]
+        meta  = dict(port_meta[key])
+        meta["label"]    = label
+        meta["resource"] = label.split()[-1] if label.startswith("2:1") else "3:1"
+        majority_ports.append(meta)
+
+    return {
+        "tile_results":      best_tiles,
+        "port_results":      majority_ports,
+        "robber_tile_index": majority_robber,
+        "vertex_colors":     majority_vertices,
+        "edge_colors":       majority_edges,
+    }
+
+
 # ── WebSocket server ──────────────────────────────────────────────────────────
 # FIX 5: duplicate/broken handler removed; single clean handler below
 async def cv_handler(websocket):
+    # All successfully-processed frames enter this buffer (validation skipped for testing).
+    valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
+    # Initialised once; buffer_size/valid_count/is_stable updated cheaply each frame.
+    # compute_majority_state runs once when the buffer first fills.
+    majority: dict = {
+        "buffer_size":       0,
+        "valid_count":       0,
+        "is_stable":         False,
+        "tile_results":      [],
+        "port_results":      [],
+        "robber_tile_index": None,
+        "vertex_colors":     [],
+        "edge_colors":       [],
+    }
     print(f"[CV] Client connected: {websocket.remote_address}")
     try:
         async for message in websocket:
@@ -1012,7 +1107,17 @@ async def cv_handler(websocket):
                 await websocket.send(processed)
                 # Always send JSON second message so client toggle stays in sync
                 if status == "ok":
-                    await websocket.send(json.dumps(state).encode())
+                    prev_full = len(valid_buffer) == FRAME_BUFFER_SIZE
+                    valid_buffer.append(state)
+                    n = len(valid_buffer)
+                    majority["buffer_size"] = n
+                    majority["valid_count"] = n
+                    majority["is_stable"]   = n == FRAME_BUFFER_SIZE
+                    if majority["is_stable"] and not prev_full:
+                        majority.update(compute_majority_state(list(valid_buffer)))
+                    payload = dict(state)
+                    payload["majority"] = majority
+                    await websocket.send(json.dumps(payload).encode())
                 else:
                     await websocket.send(json.dumps({"error": status}).encode())
     except websockets.exceptions.ConnectionClosed:
