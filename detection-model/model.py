@@ -77,7 +77,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-FRAME_BUFFER_SIZE    = 30    # frames kept for majority-vote stable state
+FRAME_BUFFER_SIZE    = 10    # frames kept for majority-vote stable state
 
 # FIX 3: SAT_BOOST / VAL_BOOST moved to module level so _boost() can use them
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
@@ -330,22 +330,6 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
         hex_m = hex_mask_fn(tx, ty, R * 0.82, (H, W))
         return bgr_full[hex_m == 255], hex_m
 
-    def classify_hex(tx, ty):
-        pixels_bgr, _ = get_pixels(tx, ty)
-        if len(pixels_bgr) == 0:
-            return "Unknown"
-
-        avg = pixels_bgr.mean(axis=0)
-        dom_h, dom_s, dom_v = float(avg[0]), float(avg[1]), float(avg[2])
-
-        for name, (lo, hi) in RESOURCES_BGR.items():
-            if (lo[0] <= dom_h <= hi[0] and
-                    lo[1] <= dom_s <= hi[1] and
-                    lo[2] <= dom_v <= hi[2]):
-                return f"{name[:2]}"
-
-        return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
-
     tile_results = []
     for row_idx, num_tiles in enumerate(tile_layout):
         row_y       = cy0 + (row_idx - (num_rows - 1) / 2) * row_spacing
@@ -353,7 +337,9 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
         for t_idx in range(num_tiles):
             tx = int(row_start_x + t_idx * col_spacing)
             ty = int(row_y)
-            tile_results.append((row_idx, t_idx, tx, ty, classify_hex(tx, ty)))
+            pixels, _ = get_pixels(tx, ty)
+            res = tf_classify_tile(np.mean(pixels, axis=0).astype(int)) if len(pixels) else "Desert"
+            tile_results.append((row_idx, t_idx, tx, ty, res))
     return tile_results
 
 # ── Player colour ─────────────────────────────────────────────────────────────
@@ -1101,6 +1087,18 @@ def compute_majority_state(buffer: list) -> dict:
 async def cv_handler(websocket):
     # All successfully-processed frames enter this buffer (validation skipped for testing).
     valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
+    # Initialised once; buffer_size/valid_count/is_stable updated cheaply each frame.
+    # compute_majority_state runs once when the buffer first fills.
+    majority: dict = {
+        "buffer_size":       0,
+        "valid_count":       0,
+        "is_stable":         False,
+        "tile_results":      [],
+        "port_results":      [],
+        "robber_tile_index": None,
+        "vertex_colors":     [],
+        "edge_colors":       [],
+    }
     print(f"[CV] Client connected: {websocket.remote_address}")
     try:
         async for message in websocket:
@@ -1109,20 +1107,13 @@ async def cv_handler(websocket):
                 await websocket.send(processed)
                 # Always send JSON second message so client toggle stays in sync
                 if status == "ok":
+                    prev_full = len(valid_buffer) == FRAME_BUFFER_SIZE
                     valid_buffer.append(state)
                     n = len(valid_buffer)
-                    full = (n == FRAME_BUFFER_SIZE)
-                    majority: dict = {
-                        "buffer_size": n,
-                        "valid_count": n,
-                        "is_stable":   full,
-                        "tile_results":      [],
-                        "port_results":      [],
-                        "robber_tile_index": None,
-                        "vertex_colors":     [],
-                        "edge_colors":       [],
-                    }
-                    if full:
+                    majority["buffer_size"] = n
+                    majority["valid_count"] = n
+                    majority["is_stable"]   = n == FRAME_BUFFER_SIZE
+                    if majority["is_stable"] and not prev_full:
                         majority.update(compute_majority_state(list(valid_buffer)))
                     payload = dict(state)
                     payload["majority"] = majority
