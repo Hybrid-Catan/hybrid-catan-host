@@ -6,7 +6,12 @@
  * and return a result, but do NOT modify any game state themselves.
  */
 
-import type { GameState, Player } from "../../../utils/type.ts";
+import type { GameState, Player, BoardWarning, color as ColorTag } from "../../../utils/type.ts";
+import {
+    CV_TO_GAME_COLOR,
+    getAdjacentVertices,
+    getEdgesAtVertex,
+} from "../../../utils/boardState.ts";
 
 
 // ============================================================
@@ -205,6 +210,154 @@ export function canBuildSettlement(player: Player): RuleResult {
 }
 
 /**
+ * Validates whether `player` can place a new settlement at `vertexId` given the
+ * current CV-detected board state.
+ *
+ * Rules enforced (Catan beginner ruleset):
+ *  1. The target corner must be empty (no settlement/city already there).
+ *  2. Distance rule — every directly-adjacent corner must also be empty,
+ *     regardless of owner. Settlements must be at least two roads apart.
+ *  3. Connectivity — outside the SETUP_1/SETUP_2 phases the new settlement
+ *     must touch at least one of this player's own roads.
+ *
+ * `reason` strings are written to be useful to a beginner: they name the rule
+ * being violated and explain what to do instead.
+ */
+export function canPlaceSettlement(
+    vertexId: number,
+    gameState: GameState,
+    player: Player,
+): RuleResult {
+    const cv = gameState.cvBoardState;
+    if (!cv || !cv.vertex_colors || !cv.edge_colors) {
+        return { valid: false, reason: "The board hasn't been detected yet. Make sure the camera can see the whole board." };
+    }
+
+    const target = cv.vertex_colors.find(v => v.id === vertexId);
+    if (!target) {
+        return { valid: false, reason: "That spot isn't a valid corner on the board." };
+    }
+
+    // 1. Target unoccupied.
+    if (target.color !== null) {
+        return {
+            valid: false,
+            reason: "There's already a building on this corner. Each corner can only hold one settlement or city.",
+        };
+    }
+
+    // 2. Distance rule — every adjacent corner must be empty.
+    const adjVertexIds = getAdjacentVertices(vertexId, cv.edge_colors);
+    for (const adjId of adjVertexIds) {
+        const adj = cv.vertex_colors.find(v => v.id === adjId);
+        if (adj && adj.color !== null) {
+            return {
+                valid: false,
+                reason: "Too close to an existing settlement. The distance rule means new settlements must be at least two roads away from every other settlement or city.",
+            };
+        }
+    }
+
+    // 3. Connectivity — only outside setup.
+    const inSetup = gameState.phase === "SETUP_1" || gameState.phase === "SETUP_2";
+    if (!inSetup) {
+        const adjacentEdges = getEdgesAtVertex(vertexId, cv.edge_colors);
+        const touchesOwnRoad = adjacentEdges.some(
+            e => e.color !== null && CV_TO_GAME_COLOR[e.color] === player.color,
+        );
+        if (!touchesOwnRoad) {
+            return {
+                valid: false,
+                reason: "Your new settlement needs to connect to one of your own roads. Build a road that reaches this corner first.",
+            };
+        }
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Validates whether `player` can place a new road on the edge between
+ * `vertexA` and `vertexB`.
+ *
+ * Rules enforced:
+ *  1. The edge must exist on the board and be empty.
+ *  2. Connectivity — at least one endpoint of the edge must connect to the
+ *     player's network. An endpoint V connects if:
+ *       - V has THIS player's settlement/city, OR
+ *       - (main game only) V has no opponent building AND another edge at V
+ *         is one of this player's roads.
+ *     In SETUP_1/SETUP_2 the road must touch one of the player's own
+ *     settlements; touching an existing road isn't enough (you place
+ *     settlement-then-road during setup).
+ *
+ * `reason` strings explain the violated rule to a beginner.
+ */
+export function canPlaceRoad(
+    vertexA: number,
+    vertexB: number,
+    gameState: GameState,
+    player: Player,
+): RuleResult {
+    const cv = gameState.cvBoardState;
+    if (!cv || !cv.vertex_colors || !cv.edge_colors) {
+        return { valid: false, reason: "The board hasn't been detected yet. Make sure the camera can see the whole board." };
+    }
+
+    const edge = cv.edge_colors.find(
+        e => (e.vertexA === vertexA && e.vertexB === vertexB) ||
+             (e.vertexA === vertexB && e.vertexB === vertexA),
+    );
+    if (!edge) {
+        return { valid: false, reason: "That isn't a road slot on the board." };
+    }
+
+    if (edge.color !== null) {
+        return {
+            valid: false,
+            reason: "There's already a road here. Each side of a hex can only hold one road.",
+        };
+    }
+
+    const vA = cv.vertex_colors.find(v => v.id === vertexA);
+    const vB = cv.vertex_colors.find(v => v.id === vertexB);
+    if (!vA || !vB) {
+        return { valid: false, reason: "One of this road's corners isn't on the board." };
+    }
+
+    const inSetup = gameState.phase === "SETUP_1" || gameState.phase === "SETUP_2";
+
+    const endpointConnects = (v: typeof vA): boolean => {
+        // The endpoint has the player's own settlement/city — always connects.
+        if (v.color !== null && CV_TO_GAME_COLOR[v.color] === player.color) return true;
+        // Setup-phase rule: only your own settlement counts as a connection.
+        if (inSetup) return false;
+        // Main game: opponent's building on this corner blocks any extension through it.
+        if (v.color !== null && CV_TO_GAME_COLOR[v.color] !== player.color) return false;
+        // Otherwise, the endpoint connects if any other edge at it is your road.
+        return cv.edge_colors.some(
+            e => (e.vertexA === v.id || e.vertexB === v.id) &&
+                 e.color !== null && CV_TO_GAME_COLOR[e.color] === player.color,
+        );
+    };
+
+    if (endpointConnects(vA) || endpointConnects(vB)) {
+        return { valid: true };
+    }
+
+    if (inSetup) {
+        return {
+            valid: false,
+            reason: "During setup, your road must touch the settlement you just placed. Put the road next to one of your own settlements.",
+        };
+    }
+    return {
+        valid: false,
+        reason: "Roads must connect to your network. The new road needs to touch one of your existing roads or settlements (and cannot extend past an opponent's settlement).",
+    };
+}
+
+/**
  * Checks whether a player can upgrade a settlement to a city.
  * Validates resource cost (2 wheat, 3 ore), piece limit (max 4 cities),
  * and that a settlement exists to upgrade.
@@ -397,4 +550,98 @@ export function canClaimLongestRoad(claimedLength: number, gameState: GameState)
     }
 
     return { valid: true };
+}
+
+/**
+ * Validates a settlement that's ALREADY on the board. canPlaceSettlement
+ * refuses to place onto an occupied vertex; here we want to ask "is this
+ * existing placement legal?" so we run the same rules with the target's
+ * own color temporarily cleared.
+ */
+function validatePlacedSettlement(vertexId: number, gameState: GameState, player: Player): RuleResult {
+    const cv = gameState.cvBoardState;
+    if (!cv) return { valid: false, reason: "Board state not available." };
+    const cleared = {
+        ...cv,
+        vertex_colors: cv.vertex_colors.map(v => v.id === vertexId ? { ...v, color: null } : v),
+    };
+    return canPlaceSettlement(vertexId, { ...gameState, cvBoardState: cleared }, player);
+}
+
+/** Same idea as validatePlacedSettlement, for an already-placed road. */
+function validatePlacedRoad(vertexA: number, vertexB: number, gameState: GameState, player: Player): RuleResult {
+    const cv = gameState.cvBoardState;
+    if (!cv) return { valid: false, reason: "Board state not available." };
+    const cleared = {
+        ...cv,
+        edge_colors: cv.edge_colors.map(e =>
+            (e.vertexA === vertexA && e.vertexB === vertexB) ||
+            (e.vertexA === vertexB && e.vertexB === vertexA)
+                ? { ...e, color: null }
+                : e,
+        ),
+    };
+    return canPlaceRoad(vertexA, vertexB, { ...gameState, cvBoardState: cleared }, player);
+}
+
+/**
+ * Scans every coloured settlement and road in the CV board state and runs the
+ * placement validators against each. Returns a list of beginner-friendly
+ * warnings for any piece that breaks a rule.
+ *
+ * Intended to be called from `/api/game/update-cv` after writing the new CV
+ * state, so the result lands in `gameState.validationWarnings` and the
+ * polling player phones can surface tutor hints.
+ */
+export function validateBoardPlacements(gameState: GameState): BoardWarning[] {
+    const warnings: BoardWarning[] = [];
+    const cv = gameState.cvBoardState;
+    if (!cv) return warnings;
+
+    // Settlements
+    for (const v of cv.vertex_colors ?? []) {
+        if (!v.color) continue;
+        const gameColor = CV_TO_GAME_COLOR[v.color] as ColorTag | undefined;
+        if (!gameColor) continue;
+        const player = gameState.players.find(p => p.color === gameColor);
+        if (!player) continue;
+        const res = validatePlacedSettlement(v.id, gameState, player);
+        if (!res.valid) {
+            warnings.push({
+                type: "SETTLEMENT",
+                playerColor: gameColor,
+                position: { vertexId: v.id },
+                reason: res.reason ?? "",
+            });
+        }
+    }
+
+    // Roads — dedup by sorted endpoint pair so a single physical edge appears
+    // once even if CV emits two entries for it.
+    const seen = new Set<string>();
+    for (const e of cv.edge_colors ?? []) {
+        if (!e.color) continue;
+        if (e.vertexA < 0 || e.vertexB < 0) continue;
+        const a = Math.min(e.vertexA, e.vertexB);
+        const b = Math.max(e.vertexA, e.vertexB);
+        const key = `${a}-${b}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const gameColor = CV_TO_GAME_COLOR[e.color] as ColorTag | undefined;
+        if (!gameColor) continue;
+        const player = gameState.players.find(p => p.color === gameColor);
+        if (!player) continue;
+        const res = validatePlacedRoad(e.vertexA, e.vertexB, gameState, player);
+        if (!res.valid) {
+            warnings.push({
+                type: "ROAD",
+                playerColor: gameColor,
+                position: { vertexA: e.vertexA, vertexB: e.vertexB },
+                reason: res.reason ?? "",
+            });
+        }
+    }
+
+    return warnings;
 }

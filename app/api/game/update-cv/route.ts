@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { games } from "@/app/lib/games";
 import { updatePlayerLongestRoadLengths } from "@/backend/gamelogic/playerstatmanagement/playerstatmanagement";
+import { validateBoardPlacements } from "@/backend/gamelogic/gamerules/gamerules";
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,6 +16,7 @@ export async function POST(req: NextRequest) {
     }
     game.cvBoardState = cvBoardState;
     updatePlayerLongestRoadLengths(game);
+    game.validationWarnings = validateBoardPlacements(game);
     return NextResponse.json({
       success: true,
     });

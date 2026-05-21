@@ -182,6 +182,24 @@ export function getHouseToPlayerMap(
     return result;
 }
 
+/**
+ * Returns the IDs of vertices directly connected to `vertexId` by an edge.
+ * Uses the CV-emitted vertexA/vertexB pointers — no geometry.
+ */
+export function getAdjacentVertices(vertexId: number, edges: CVEdge[]): number[] {
+    const result: number[] = [];
+    for (const e of edges) {
+        if (e.vertexA === vertexId && e.vertexB >= 0) result.push(e.vertexB);
+        else if (e.vertexB === vertexId && e.vertexA >= 0) result.push(e.vertexA);
+    }
+    return result;
+}
+
+/** Returns every edge that touches `vertexId`. */
+export function getEdgesAtVertex(vertexId: number, edges: CVEdge[]): CVEdge[] {
+    return edges.filter(e => e.vertexA === vertexId || e.vertexB === vertexId);
+}
+
 /** Which roads (edges) each player owns */
 export function getRoadToPlayerMap(
     state: CVBoardState,
