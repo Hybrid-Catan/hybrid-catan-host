@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
       });
     }
     game.cvBoardState = cvBoardState;
+    // console.dir(games, { depth: null })
     updatePlayerLongestRoadLengths(game);
     return NextResponse.json({
       success: true,
