@@ -8,6 +8,7 @@ from scipy.spatial.distance import cdist
 import json
 from dataclasses import dataclass, asdict
 from typing import Optional
+from collections import deque, Counter
 
 @dataclass
 class BoardState:
@@ -76,6 +77,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
+FRAME_BUFFER_SIZE    = 30   # frames kept for majority-vote stable state
 
 # FIX 3: SAT_BOOST / VAL_BOOST moved to module level so _boost() can use them
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
@@ -930,9 +932,104 @@ def test_image(image_path: str, output_path: str = "test_output.jpg"):
     print(f"Status: {status}")
     print(f"Output saved to: {output_path}")
 
+# ── Valid board state filter ──────────────────────────────────────────────────
+VALID_RESOURCE_COUNTS = {"Forest": 4, "Pasture": 4, "Field": 4, "Hills": 3, "Mountain": 3, "Desert": 1}
+
+
+def is_valid_board_state(state: dict) -> bool:
+    """Return True only when the 19 detected tiles match the standard Catan distribution."""
+    tiles = state.get("tile_results", [])
+    if len(tiles) != 19:
+        return False
+    counts = Counter(t.get("resource") for t in tiles)
+    return all(counts.get(res, 0) == n for res, n in VALID_RESOURCE_COUNTS.items())
+
+
+def compute_majority_state(buffer: list) -> dict:
+    """Elect the most common complete board layout from a buffer of pre-validated states.
+    All frames in the buffer have already passed is_valid_board_state."""
+
+    # Elect the most common complete board layout
+    config_votes: Counter = Counter()
+    config_state: dict = {}
+    for state in buffer:
+        tiles = sorted(state.get("tile_results", []), key=lambda t: t.get("spiralIndex", 0))
+        key = tuple(t.get("resource") for t in tiles)
+        config_votes[key] += 1
+        config_state[key] = state
+
+    best_key = config_votes.most_common(1)[0][0]
+    best_tiles = config_state[best_key].get("tile_results", [])
+
+    # Majority-vote dynamic fields across all frames in the buffer
+    robber_votes: Counter = Counter(
+        s.get("robber_tile_index")
+        for s in buffer
+        if s.get("robber_tile_index") is not None
+    )
+    majority_robber = robber_votes.most_common(1)[0][0] if robber_votes else None
+
+    vertex_votes: dict = {}
+    vertex_meta: dict = {}
+    for state in buffer:
+        for v in state.get("vertex_colors", []):
+            key = (round(v["cx"] / 8) * 8, round(v["cy"] / 8) * 8)
+            if key not in vertex_votes:
+                vertex_votes[key] = Counter()
+            vertex_votes[key][v.get("color")] += 1
+            vertex_meta[key] = v
+    majority_vertices = []
+    for key, votes in vertex_votes.items():
+        meta = dict(vertex_meta[key])
+        meta["color"] = votes.most_common(1)[0][0]
+        majority_vertices.append(meta)
+
+    edge_votes: dict = {}
+    edge_meta: dict = {}
+    for state in buffer:
+        for e in state.get("edge_colors", []):
+            key = (round(e["cx"] / 8) * 8, round(e["cy"] / 8) * 8)
+            if key not in edge_votes:
+                edge_votes[key] = Counter()
+            edge_votes[key][e.get("color")] += 1
+            edge_meta[key] = e
+    majority_edges = []
+    for key, votes in edge_votes.items():
+        meta = dict(edge_meta[key])
+        meta["color"] = votes.most_common(1)[0][0]
+        majority_edges.append(meta)
+
+    port_votes: dict = {}
+    port_meta: dict = {}
+    for state in buffer:
+        for p in state.get("port_results", []):
+            key = (round(p["cx"] / 20) * 20, round(p["cy"] / 20) * 20)
+            if key not in port_votes:
+                port_votes[key] = Counter()
+            port_votes[key][p.get("label", "3:1")] += 1
+            port_meta[key] = p
+    majority_ports = []
+    for key, votes in port_votes.items():
+        label = votes.most_common(1)[0][0]
+        meta  = dict(port_meta[key])
+        meta["label"]    = label
+        meta["resource"] = label.split()[-1] if label.startswith("2:1") else "3:1"
+        majority_ports.append(meta)
+
+    return {
+        "tile_results":      best_tiles,
+        "port_results":      majority_ports,
+        "robber_tile_index": majority_robber,
+        "vertex_colors":     majority_vertices,
+        "edge_colors":       majority_edges,
+    }
+
+
 # ── WebSocket server ──────────────────────────────────────────────────────────
 # FIX 5: duplicate/broken handler removed; single clean handler below
 async def cv_handler(websocket):
+    # Only valid frames enter this buffer; majority is computed once it is full.
+    valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
     print(f"[CV] Client connected: {websocket.remote_address}")
     try:
         async for message in websocket:
@@ -941,7 +1038,25 @@ async def cv_handler(websocket):
                 await websocket.send(processed)
                 # Always send JSON second message so client toggle stays in sync
                 if status == "ok":
-                    await websocket.send(json.dumps(state).encode())
+                    if is_valid_board_state(state):
+                        valid_buffer.append(state)
+                    n = len(valid_buffer)
+                    full = (n == FRAME_BUFFER_SIZE)
+                    majority: dict = {
+                        "buffer_size": n,
+                        "valid_count": n,
+                        "is_stable":   full,
+                        "tile_results":      [],
+                        "port_results":      [],
+                        "robber_tile_index": None,
+                        "vertex_colors":     [],
+                        "edge_colors":       [],
+                    }
+                    if full:
+                        majority.update(compute_majority_state(list(valid_buffer)))
+                    payload = dict(state)
+                    payload["majority"] = majority
+                    await websocket.send(json.dumps(payload).encode())
                 else:
                     await websocket.send(json.dumps({"error": status}).encode())
     except websockets.exceptions.ConnectionClosed:

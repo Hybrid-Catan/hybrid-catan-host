@@ -1,8 +1,12 @@
 "use client";
 import { useRef, useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { createGame } from "./lib/createGame"
 import QRCode from "react-qr-code";
-import { parseBoardState, CVBoardState } from "@/utils/boardState"
+import { parseBoardState, CVBoardState, CVTile } from "@/utils/boardState"
+import type { TileType, SettlementInfo, RoadInfo } from "./components/CatanBoard3D";
+
+const CatanBoard3D = dynamic(() => import("./components/CatanBoard3D"), { ssr: false });
 
 interface MiniHexProps {
   x: number; y: number; size: number; fill: string;
@@ -85,6 +89,138 @@ function now() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+// ── Stable board hex-grid helpers ────────────────────────────────────────────
+const TILE_LAYOUT = [3, 4, 5, 4, 3];
+const HEX_R = 21;
+const COL_SPACING = HEX_R * Math.sqrt(3);
+const ROW_SPACING = HEX_R * 1.5;
+const SVG_W = 256;
+const SVG_H = 210;
+const CX0 = SVG_W / 2;
+const CY0 = SVG_H / 2;
+const BUFFER_CAPACITY = 30;
+
+const RESOURCE_FILL: Record<string, string> = {
+  Pasture: "#22c55e", Mountain: "#64748b", Field: "#eab308",
+  Hills: "#9a3412",   Forest: "#15803d",   Desert: "#ca8a04", Water: "#0369a1",
+};
+
+function hexPts(cx: number, cy: number, r: number) {
+  return Array.from({ length: 6 }, (_, i) => {
+    const a = (Math.PI / 180) * (30 + i * 60);
+    return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+  }).join(" ");
+}
+
+function tilePx(row: number, col: number): [number, number] {
+  const n = TILE_LAYOUT[row];
+  return [CX0 - ((n - 1) / 2) * COL_SPACING + col * COL_SPACING, CY0 + (row - 2) * ROW_SPACING];
+}
+
+// ── CV → 3D board mapping ─────────────────────────────────────────────────────
+
+// CV resource name → CatanBoard3D tile type
+const CV_TO_TILE_MAP: Record<string, TileType> = {
+  Mountain: 'ore', Pasture: 'sheep', Field: 'wheat',
+  Desert: 'desert', Forest: 'wood', Hills: 'brick',
+};
+
+// (row, col) in the 3-4-5-4-3 visual grid → worldPos array index in CatanBoard3D
+const WORLD_POS_FROM_ROW_COL: number[][] = [
+  [7, 12, 16],
+  [3,  8, 13, 17],
+  [0,  4,  9, 14, 18],
+  [1,  5, 10, 15],
+  [2,  6, 11],
+];
+
+// Spiral order (same as Python CATAN_SPIRAL_POSITIONS): spiralIndex → [row, col]
+const CATAN_SPIRAL_POSITIONS: [number, number][] = [
+  [0,0],[0,1],[0,2],
+  [1,3],[2,4],[3,3],
+  [4,2],[4,1],[4,0],
+  [3,0],[2,0],[1,0],
+  [1,1],[1,2],
+  [2,3],[3,2],[3,1],
+  [2,1],[2,2],
+];
+
+// Player color string from CV → Three.js hex color
+const PLAYER_COLOR_THREE: Record<string, number> = {
+  orange: 0xff8c00, red: 0xff0000, blue: 0x0000ff, white: 0xffffff,
+};
+
+function spiralToQR(spiralIndex: number): [number, number] | null {
+  const pos = CATAN_SPIRAL_POSITIONS[spiralIndex];
+  if (!pos) return null;
+  const [row, col] = pos;
+  return [col - Math.min(row, 2), row - 2];
+}
+
+// Convert stable CVBoardState tile layout to TileType[] in worldPos order
+function cvStateToTileTypes(state: CVBoardState): TileType[] {
+  const layout: TileType[] = new Array(19).fill('ore');
+  for (const tile of state.tile_results) {
+    const rowMap = WORLD_POS_FROM_ROW_COL[tile.row];
+    if (!rowMap) continue;
+    const worldIdx = rowMap[tile.col];
+    if (worldIdx === undefined) continue;
+    layout[worldIdx] = CV_TO_TILE_MAP[tile.resource] ?? 'ore';
+  }
+  return layout;
+}
+
+// Convert stable CVBoardState vertex/edge data to 3D settlement/road positions.
+// CV vertex i is at image angle (30 + i*60)° from tile center.
+// Render vertex v = (i + 2) % 6  (same formula for edges).
+function cvStateToPieces(state: CVBoardState): { settlements: SettlementInfo[]; roads: RoadInfo[] } {
+  const tileBySpiral = new Map<number, CVTile>();
+  for (const tile of state.tile_results) {
+    if (tile.spiralIndex != null) tileBySpiral.set(tile.spiralIndex, tile);
+  }
+
+  function pixelAngleToRenderIndex(dx: number, dy: number, offsetDeg: number): number {
+    const deg = ((Math.atan2(dy, dx) * 180 / Math.PI) + 360) % 360;
+    const i   = ((Math.round((deg - offsetDeg) / 60) % 6) + 6) % 6;
+    return (i + 2) % 6;
+  }
+
+  const settlements: SettlementInfo[] = [];
+  const seenV = new Set<string>();
+  for (const vertex of state.vertex_colors) {
+    if (!vertex.color) continue;
+    const tile = tileBySpiral.get(vertex.hexIndex);
+    if (!tile) continue;
+    const qr = spiralToQR(vertex.hexIndex);
+    if (!qr) continue;
+    const [q, r] = qr;
+    const v   = pixelAngleToRenderIndex(vertex.cx - tile.cx, vertex.cy - tile.cy, 30);
+    const key = `${q},${r},${v}`;
+    if (seenV.has(key)) continue;
+    seenV.add(key);
+    settlements.push({ q, r, v, color: PLAYER_COLOR_THREE[vertex.color] ?? 0xffffff });
+  }
+
+  const roads: RoadInfo[] = [];
+  const seenE = new Set<string>();
+  for (const edge of state.edge_colors) {
+    if (!edge.color) continue;
+    const tile = tileBySpiral.get(edge.hexIndex);
+    if (!tile) continue;
+    const qr = spiralToQR(edge.hexIndex);
+    if (!qr) continue;
+    const [q, r] = qr;
+    // Edge i midpoint is at angle (i+1)*60°; offset = 60° so round(deg/60)-1 = i
+    const e   = pixelAngleToRenderIndex(edge.cx - tile.cx, edge.cy - tile.cy, 60);
+    const key = `${q},${r},${e}`;
+    if (seenE.has(key)) continue;
+    seenE.add(key);
+    roads.push({ q, r, e, color: PLAYER_COLOR_THREE[edge.color] ?? 0xffffff });
+  }
+
+  return { settlements, roads };
+}
+
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
@@ -130,6 +266,12 @@ export default function Host() {
   const cvExpectJsonRef = useRef(false);
   // FIX: throttle CV log entries to avoid flooding React state updates
   const lastCvLogRef = useRef(0);
+
+  const [stableState, setStableState] = useState<CVBoardState | null>(null);
+  const [bufferInfo, setBufferInfo] = useState({ size: 0, validCount: 0, stable: false });
+  const [boardTileTypes,  setBoardTileTypes]  = useState<TileType[] | undefined>(undefined);
+  const [boardSettlements, setBoardSettlements] = useState<SettlementInfo[] | undefined>(undefined);
+  const [boardRoads,       setBoardRoads]       = useState<RoadInfo[] | undefined>(undefined);
 
   function addLog(msg: string, type: LogEntry["type"] = "info") {
     setLogs(l => [{ ts: now(), msg, type }, ...l].slice(0, 80));
@@ -284,6 +426,22 @@ export default function Host() {
             addLog(bs.edge_colors?.map(e => e?.color?.toString()).toString() ?? "null", "warn")
             logCvState(state);
             setCvStatus("processing");
+
+            if (state.majority) {
+              const maj        = state.majority;
+              const stableBoard = parseBoardState(maj);
+              setStableState(stableBoard);
+              setBufferInfo({ size: maj.buffer_size ?? 0, validCount: maj.valid_count ?? 0, stable: maj.is_stable ?? false });
+
+              if (maj.is_stable && stableBoard.tile_results.length > 0) {
+                const newTypes = cvStateToTileTypes(stableBoard);
+                setBoardTileTypes(prev => JSON.stringify(prev) === JSON.stringify(newTypes) ? prev : newTypes);
+
+                const { settlements: newS, roads: newR } = cvStateToPieces(stableBoard);
+                setBoardSettlements(prev => JSON.stringify(prev) === JSON.stringify(newS) ? prev : newS);
+                setBoardRoads(prev => JSON.stringify(prev) === JSON.stringify(newR) ? prev : newR);
+              }
+            }
           }
         } catch {
           // Don't let a bad JSON message permanently break the toggle
@@ -685,36 +843,20 @@ export default function Host() {
                 }} />
             ))}
 
-            {status !== "live" && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10">
-                <div className="float">
-                  <svg viewBox="0 0 80 80" className="w-20 h-20">
-                    <MiniHex x={40} y={40} size={36} fill="rgba(200,134,26,.12)" stroke="rgba(200,134,26,.5)" opacity={1} />
-                    <text x="40" y="47" textAnchor="middle" fill="#C8861A" fontSize="22">
-                      {hasDormantSession ? "⏸" : status === "connecting" ? "⏳" : status === "error" ? "⚠️" : "📷"}
-                    </text>
-                  </svg>
-                </div>
-                <p className="f-cinzel text-sm text-[#4A5875] tracking-[0.3em] uppercase">
-                  {hasDormantSession
-                    ? "Session paused — camera off"
-                    : status === "connecting" ? "Requesting camera…"
-                      : status === "error" ? "Connection failed"
-                        : "Camera not connected"}
-                </p>
-                {hasDormantSession && (
-                  <p className="f-body text-xs text-[#C8861A]/60 tracking-wide">
-                    Room code <span className="font-bold text-[#C8861A]">{gameId?.split("-")[1]}</span> is preserved — players are waiting
-                  </p>
-                )}
-              </div>
-            )}
+            {/* 3D board — fades in once majority vote is stable */}
+            <CatanBoard3D
+              className={`absolute inset-0 w-full h-full transition-opacity duration-700 ${bufferInfo.stable ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+              tileTypes={boardTileTypes}
+              settlements={boardSettlements}
+              roads={boardRoads}
+            />
 
+            {/* Canvas: live CV feed before stable, stays in DOM for WebRTC after */}
             <canvas
               ref={canvasRef}
               width={1280}
               height={720}
-              className={`w-full h-full object-cover transition-opacity duration-500 ${status === "live" ? "opacity-100" : "opacity-0"}`}
+              className={`absolute inset-0 w-full h-full transition-opacity duration-700 ${status === "live" && !bufferInfo.stable ? "opacity-100" : "opacity-0 pointer-events-none"}`}
               style={{ background: "#000" }}
             />
 
@@ -931,6 +1073,66 @@ export default function Host() {
               })}
             </div>
           </div>
+
+          {/* ── Stable Board State ── */}
+          {stableState && stableState.tile_results.length > 0 && bufferInfo.stable && (
+            <div className="rounded-xl border border-purple-500/20 bg-[#0E1117] overflow-hidden card-glow">
+              <div className="px-5 py-3 border-b border-purple-500/15 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`w-1.5 h-1.5 rounded-full bg-purple-400 ${bufferInfo.stable ? "animate-pulse" : "opacity-40"}`} />
+                  <span className="f-cinzel text-xs text-purple-400 tracking-[0.25em] uppercase">
+                    {bufferInfo.stable ? "Stable Board" : "Calibrating…"}
+                  </span>
+                </div>
+                <span className="f-cinzel text-[9px] text-[#4A5875]">
+                  {bufferInfo.size} / {BUFFER_CAPACITY} valid frames
+                </span>
+              </div>
+              <div className="px-2 py-3 flex justify-center">
+                <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} width="100%" style={{ maxWidth: SVG_W }}>
+                  {stableState.tile_results.map((tile) => {
+                    const [tx, ty] = tilePx(tile.row, tile.col);
+                    const fill = RESOURCE_FILL[tile.resource] ?? "#374151";
+                    const isRobber = stableState.robber_tile_index === tile.spiralIndex;
+                    return (
+                      <g key={tile.spiralIndex}>
+                        <polygon
+                          points={hexPts(tx, ty, HEX_R - 1)}
+                          fill={fill}
+                          stroke={isRobber ? "#ef4444" : "#0f172a"}
+                          strokeWidth={isRobber ? 2.5 : 1}
+                          opacity={0.9}
+                        />
+                        {tile.number != null && (
+                          <>
+                            <circle cx={tx} cy={ty} r={8} fill="#f0e6cc" opacity={0.92} />
+                            <text x={tx} y={ty + 3.5} textAnchor="middle"
+                              fill={tile.number === 6 || tile.number === 8 ? "#dc2626" : "#0e1117"}
+                              fontSize="7" fontWeight="bold" fontFamily="Cinzel,serif">
+                              {tile.number}
+                            </text>
+                          </>
+                        )}
+                        {isRobber && (
+                          <circle cx={tx} cy={ty - HEX_R + 4} r={4} fill="#ef4444" />
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+              {!bufferInfo.stable && (
+                <div className="px-4 pb-3">
+                  <div className="h-0.5 rounded-full bg-[#2A3347]">
+                    <div
+                      className="h-0.5 rounded-full bg-purple-500 transition-all duration-300"
+                      style={{ width: `${Math.min(100, (bufferInfo.size / BUFFER_CAPACITY) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Raw Camera Debug Preview ── */}
           <div className="rounded-xl border border-[#2A3347] bg-[#0E1117] overflow-hidden card-glow">
