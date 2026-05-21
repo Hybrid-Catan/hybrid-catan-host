@@ -288,28 +288,72 @@ def hex_mask_fn(cx, cy, r, shape):
     cv2.fillPoly(mask, [pts], 255)
     return mask
 
+def enhance_tile_contrast(img_bgr: np.ndarray) -> np.ndarray:
+    # ── 1. CLAHE on each BGR channel independently ────────────────────────
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
+    b, g, r = cv2.split(img_bgr)
+    img_eq = cv2.merge([clahe.apply(b), clahe.apply(g), clahe.apply(r)])
+
+    # ── 2. Per-channel contrast stretch ──────────────────────────────────
+    img_float = img_eq.astype(np.float32)
+    b, g, r   = cv2.split(img_float)
+    b = np.clip(b * 1.1, 0, 255)
+    g = np.clip(g * 1.2, 0, 255)
+    r = np.clip(r * 1.15, 0, 255)
+    img_boosted = cv2.merge([b, g, r]).astype(np.uint8)
+
+    # ── 3. Unsharp mask ───────────────────────────────────────────────────
+    blur      = cv2.GaussianBlur(img_boosted, (0, 0), sigmaX=2.5)
+    img_sharp = cv2.addWeighted(img_boosted, 1.4, blur, -0.4, 0)
+
+    return img_sharp
+
+RESOURCES_BGR = {
+    "Hill": (np.array([20, 50, 113]), np.array([70, 95, 150])),       #
+    "Forest": (np.array([30, 65, 35]), np.array([60, 95, 60])),  #
+    "Pasture": (np.array([40, 145, 120]), np.array([75, 185, 165])), #
+    "Mountain": (np.array([60, 70, 85]), np.array([95, 95, 105])),#
+    "Desert": (np.array([103, 165, 185]), np.array([115, 180, 240])), #
+    "Field": (np.array([30, 105, 150]), np.array([75, 145, 205])), 
+}
+
+i = 0
+
 def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
-    num_rows     = len(tile_layout)
-    col_spacing  = R * np.sqrt(3)
-    row_spacing  = R * 1.5
-    bgr_full     = final_hex_crop.copy()
+    global i
+    num_rows    = len(tile_layout)
+    col_spacing = R * np.sqrt(3)
+    row_spacing = R * 1.5
+    bgr_full    = final_hex_crop
 
     def get_pixels(tx, ty):
-        dm = np.ones((H,W), dtype=np.uint8) * 255
-        cv2.circle(dm, (int(tx), int(ty)), int(R*0.35), 0, -1)
-        combined = cv2.bitwise_and(hex_mask_fn(tx, ty, R*0.82, (H,W)), dm)
-        return bgr_full[combined == 255]
+        hex_m = hex_mask_fn(tx, ty, R * 0.82, (H, W))
+        return bgr_full[hex_m == 255], hex_m
+
+    def classify_hex(tx, ty):
+        pixels_bgr, _ = get_pixels(tx, ty)
+        if len(pixels_bgr) == 0:
+            return "Unknown"
+
+        avg = pixels_bgr.mean(axis=0)
+        dom_h, dom_s, dom_v = float(avg[0]), float(avg[1]), float(avg[2])
+
+        for name, (lo, hi) in RESOURCES_BGR.items():
+            if (lo[0] <= dom_h <= hi[0] and
+                    lo[1] <= dom_s <= hi[1] and
+                    lo[2] <= dom_v <= hi[2]):
+                return f"{name[:2]}"
+
+        return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
 
     tile_results = []
     for row_idx, num_tiles in enumerate(tile_layout):
-        row_y       = cy0 + (row_idx - (num_rows-1)/2) * row_spacing
-        row_start_x = cx0 - ((num_tiles-1)/2) * col_spacing
+        row_y       = cy0 + (row_idx - (num_rows - 1) / 2) * row_spacing
+        row_start_x = cx0 - ((num_tiles - 1) / 2) * col_spacing
         for t_idx in range(num_tiles):
             tx = int(row_start_x + t_idx * col_spacing)
             ty = int(row_y)
-            pixels = get_pixels(tx, ty)
-            res = tf_classify_tile(np.mean(pixels, axis=0).astype(int)) if len(pixels) else "Desert"
-            tile_results.append((row_idx, t_idx, tx, ty, res))
+            tile_results.append((row_idx, t_idx, tx, ty, classify_hex(tx, ty)))
     return tile_results
 
 # ── Player colour ─────────────────────────────────────────────────────────────
