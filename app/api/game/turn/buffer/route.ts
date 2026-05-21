@@ -26,13 +26,7 @@ export async function POST(req: Request) {
     }
     verticesByPlayer.get(normalizedColor)!.push(v);
   }
-  type Gains = {
-    WHEAT: number;
-    WOOD: number;
-    ORE: number;
-    WOOL: number;
-    BRICK: number;
-  };
+  type Gains = { WHEAT: number; WOOD: number; ORE: number; WOOL: number; BRICK: number; };
   const RESOURCE_MAP: Record<string, keyof Gains | null> = {
     Field: "WHEAT",
     Forest: "WOOD",
@@ -43,22 +37,10 @@ export async function POST(req: Request) {
     Water: null,
   };
   const resourceMap: Record<string, any> = {};
-  const totalGains = {
-    WOOD: 0,
-    BRICK: 0,
-    WOOL: 0,
-    WHEAT: 0,
-    ORE: 0,
-  };
+  const totalGains = { WOOD: 0, BRICK: 0, WOOL: 0, WHEAT: 0, ORE: 0 };
   for (const player of newGameState.players) {
     const ownedVertices = verticesByPlayer.get(player.color) || [];
-    const gains: Gains = {
-      WOOD: 0,
-      BRICK: 0,
-      WOOL: 0,
-      WHEAT: 0,
-      ORE: 0,
-    };
+    const gains: Gains = { WOOD: 0, BRICK: 0, WOOL: 0, WHEAT: 0, ORE: 0 };
     for (const vertex of ownedVertices) {
       const tile = tileMap.get(vertex.hexIndex);
       if (!tile) continue;
