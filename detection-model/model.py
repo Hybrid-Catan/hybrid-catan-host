@@ -41,8 +41,8 @@ RESOURCES_BGR = {
     "Forest": (np.array([30, 65, 30]), np.array([60, 95, 60])),  #
     "Pasture": (np.array([35, 145, 120]), np.array([75, 185, 165])), #
     "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),#
-    "Desert": (np.array([75, 155, 170]), np.array([115, 180, 240])), #
-    "Field": (np.array([30, 105, 150]), np.array([75, 145, 205])), 
+    "Desert": (np.array([75, 150, 170]), np.array([115, 180, 240])), #
+    "Field": (np.array([30, 105, 140]), np.array([75, 145, 205])), 
 }
 RESOURCE_DRAW_COLORS = {
     "Pasture":  ( 80, 180,  80),
@@ -77,7 +77,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-FRAME_BUFFER_SIZE    = 10    # frames kept for majority-vote stable state
+FRAME_BUFFER_SIZE    = 100    # frames kept for majority-vote stable state
 
 # FIX 3: SAT_BOOST / VAL_BOOST moved to module level so _boost() can use them
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
