@@ -1,5 +1,23 @@
 import { GameState, Player } from "@/utils/type";
+import type { CVBoardState } from "@/utils/boardState";
 import { getRobberStealTargets } from "../gamerules/gamerules";
+
+/**
+ * Finds the spiralIndex of the desert tile in the CV board state.
+ * The robber starts on the desert in Catan, so this is used to seed the
+ * robber's initial position once CV has detected the board.
+ *
+ * Returns null if CV hasn't found any tiles yet or there's no desert.
+ */
+export function findDesertTileIndex(cv: CVBoardState | undefined): number | null {
+    if (!cv?.tile_results) return null;
+    for (const t of cv.tile_results) {
+        if (t.resource === "Desert" && typeof t.spiralIndex === "number") {
+            return t.spiralIndex;
+        }
+    }
+    return null;
+}
 
 export type PlaceRobberResult = {
     gameState: GameState;
