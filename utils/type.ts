@@ -70,6 +70,19 @@ export type developmentCards = {
 export type color = "BLUE" | "RED" | "WHITE" | "ORANGE";
 
 /**
+ * A rules-engine complaint about a piece the CV detected on the board.
+ * `position` carries the offending vertex (settlements) or edge endpoints
+ * (roads) so the UI can highlight the spot if it wants to. `reason` is a
+ * beginner-friendly explanation suitable for showing in a tutor panel.
+ */
+export type BoardWarning = {
+    type: "SETTLEMENT" | "ROAD";
+    playerColor: color;
+    position: { vertexId: number } | { vertexA: number; vertexB: number };
+    reason: string;
+};
+
+/**
  * Represents a single player and all their in-game state.
  * Players are stored in turn order in GameState.players —
  * the first element is always the active player.
@@ -132,6 +145,8 @@ export type GameState = {
         "playerId": UUID,
     }
     "cvBoardState": CVBoardState;
+    /** Rule violations the CV pipeline detected. Populated by validateBoardPlacements. */
+    "validationWarnings"?: BoardWarning[];
 }
 export type PlayerToResourceMap = {
     [playerId: string]: resourceCards;

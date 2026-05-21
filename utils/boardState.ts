@@ -11,8 +11,14 @@ export type CVTile = {
     number: number | null;
 };
 export type CVPort = { cx: number; cy: number; label: string; resource: string };
-export type CVVertex = { cx: number; cy: number; hexIndex: number; color: string | null };
-export type CVEdge = { cx: number; cy: number; angle: number; hexIndex: number; color: string | null };
+export type CVVertex = { id: number; cx: number; cy: number; hexIndex: number; color: string | null };
+export type CVEdge = {
+    cx: number; cy: number; angle: number; hexIndex: number; color: string | null;
+    /** Index into CVBoardState.vertex_colors. -1 if unresolved. */
+    vertexA: number;
+    /** Index into CVBoardState.vertex_colors. -1 if unresolved. */
+    vertexB: number;
+};
 
 export type CVBoardState = {
     tile_results: CVTile[];
@@ -56,7 +62,8 @@ export function parseBoardState(state: Record<string, unknown>): CVBoardState {
         resource: p.resource as string,
     }));
 
-    const vertex_colors: CVVertex[] = rawVertices.map(v => ({
+    const vertex_colors: CVVertex[] = rawVertices.map((v, i) => ({
+        id: (v.id as number) ?? i,
         cx: v.cx as number,
         cy: v.cy as number,
         hexIndex: v.hexIndex as number,
@@ -69,6 +76,8 @@ export function parseBoardState(state: Record<string, unknown>): CVBoardState {
         angle: e.angle as number,
         hexIndex: e.hexIndex as number,
         color: (e.color as string | null) ?? null,
+        vertexA: (e.vertexA as number) ?? -1,
+        vertexB: (e.vertexB as number) ?? -1,
     }));
 
     return {
@@ -171,6 +180,24 @@ export function getHouseToPlayerMap(
         };
     }
     return result;
+}
+
+/**
+ * Returns the IDs of vertices directly connected to `vertexId` by an edge.
+ * Uses the CV-emitted vertexA/vertexB pointers — no geometry.
+ */
+export function getAdjacentVertices(vertexId: number, edges: CVEdge[]): number[] {
+    const result: number[] = [];
+    for (const e of edges) {
+        if (e.vertexA === vertexId && e.vertexB >= 0) result.push(e.vertexB);
+        else if (e.vertexB === vertexId && e.vertexA >= 0) result.push(e.vertexA);
+    }
+    return result;
+}
+
+/** Returns every edge that touches `vertexId`. */
+export function getEdgesAtVertex(vertexId: number, edges: CVEdge[]): CVEdge[] {
+    return edges.filter(e => e.vertexA === vertexId || e.vertexB === vertexId);
 }
 
 /** Which roads (edges) each player owns */
