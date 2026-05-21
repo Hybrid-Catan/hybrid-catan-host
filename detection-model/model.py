@@ -37,13 +37,14 @@ PORT_COLORS = {
 }
 
 RESOURCES_BGR = {
-    "Hill": (np.array([20, 50, 113]), np.array([70, 95, 150])),       #
-    "Forest": (np.array([30, 65, 30]), np.array([60, 95, 60])),  #
-    "Pasture": (np.array([35, 145, 120]), np.array([75, 185, 165])), #
-    "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),#
-    "Desert": (np.array([75, 150, 170]), np.array([115, 180, 240])), #
-    "Field": (np.array([30, 105, 140]), np.array([75, 145, 205])), 
+    "Hill": (np.array([20, 50, 113]), np.array([70, 95, 150])),
+    "Forest": (np.array([30, 65, 30]), np.array([60, 95, 60])),
+    "Pasture": (np.array([35, 145, 120]), np.array([75, 185, 165])),
+    "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),
+    "Desert": (np.array([75, 150, 170]), np.array([115, 180, 240])),
+    "Field": (np.array([30, 105, 140]), np.array([75, 145, 205])),
 }
+
 RESOURCE_DRAW_COLORS = {
     "Pasture":  ( 80, 180,  80),
     "Field":    ( 30, 200, 220),
@@ -310,10 +311,7 @@ def enhance_tile_contrast(img_bgr: np.ndarray) -> np.ndarray:
 
 
 
-i = 0
-
 def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
-    global i
     num_rows    = len(tile_layout)
     col_spacing = R * np.sqrt(3)
     row_spacing = R * 1.5
@@ -335,7 +333,7 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
             if (lo[0] <= dom_h <= hi[0] and
                     lo[1] <= dom_s <= hi[1] and
                     lo[2] <= dom_v <= hi[2]):
-                return f"{name[:2]}"
+                return f"{name}"
 
         return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
 
