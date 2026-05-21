@@ -1,4 +1,5 @@
 import { UUID } from "crypto";
+import { CVBoardState } from "./boardState";
 
 
 /**
@@ -80,7 +81,9 @@ export type Player = {
     "color": "BLUE" | "RED" | "WHITE" | "ORANGE",
     "victoryPoints": number,
     "resourceCards": resourceCards,
-    "developmentCards": developmentCards,
+    "developmentCards": Record<DevelopmentCardType, number>,
+    "newDevelopmentCards": Partial<Record<DevelopmentCardType, number>>,
+    "devCardPlayedThisTurn": boolean,
     "pieces": {
         "settlementsPlaced": number,
         "citiesPlaced": number,
@@ -125,10 +128,10 @@ export type GameState = {
     },
     "pendingFreeRoads": number,
     "largestArmyPlayerId"?: string,
-    "devCardPurchasedThisTurn": Record<UUID, boolean>,
     "winner": {
         "playerId": UUID,
     }
+    "cvBoardState": CVBoardState;
 }
 export type PlayerToResourceMap = {
     [playerId: string]: resourceCards;

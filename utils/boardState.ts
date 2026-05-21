@@ -23,7 +23,7 @@ export type CVBoardState = {
 };
 
 // CV color string → game player color
-const CV_TO_GAME_COLOR: Record<string, string> = {
+export const CV_TO_GAME_COLOR: Record<string, string> = {
     orange: "ORANGE", red: "RED", blue: "BLUE", white: "WHITE",
 };
 
@@ -33,9 +33,53 @@ const CV_TO_RESOURCE: Record<string, keyof resourceCards> = {
     Hills: "BRICK", Forest: "WOOD",
 };
 
-export function parseBoardState(raw: unknown): CVBoardState {
-    return raw as CVBoardState; // validate with zod in production
+export function parseBoardState(state: Record<string, unknown>): CVBoardState {
+    const rawTiles = (state.tile_results as Array<Record<string, unknown>>) ?? [];
+    const rawPorts = (state.port_results as Array<Record<string, unknown>>) ?? [];
+    const rawVertices = (state.vertex_colors as Array<Record<string, unknown>>) ?? [];
+    const rawEdges = (state.edge_colors as Array<Record<string, unknown>>) ?? [];
+
+    const tile_results: CVTile[] = rawTiles.map(t => ({
+        spiralIndex: t.spiralIndex as number,
+        row: t.row as number,
+        col: t.col as number,
+        cx: t.cx as number,
+        cy: t.cy as number,
+        resource: t.resource as CVTile["resource"],
+        number: (t.number as number | null) ?? null,
+    }));
+
+    const port_results: CVPort[] = rawPorts.map(p => ({
+        cx: p.cx as number,
+        cy: p.cy as number,
+        label: p.label as string,
+        resource: p.resource as string,
+    }));
+
+    const vertex_colors: CVVertex[] = rawVertices.map(v => ({
+        cx: v.cx as number,
+        cy: v.cy as number,
+        hexIndex: v.hexIndex as number,
+        color: (v.color as string | null) ?? null,
+    }));
+
+    const edge_colors: CVEdge[] = rawEdges.map(e => ({
+        cx: e.cx as number,
+        cy: e.cy as number,
+        angle: e.angle as number,
+        hexIndex: e.hexIndex as number,
+        color: (e.color as string | null) ?? null,
+    }));
+
+    return {
+        tile_results,
+        port_results,
+        robber_tile_index: (state.robber_tile_index as number | null) ?? null,
+        vertex_colors,
+        edge_colors,
+    };
 }
+
 
 // ── Map builders ──────────────────────────────────────────────────────────────
 
