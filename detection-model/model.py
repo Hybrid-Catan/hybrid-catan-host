@@ -1090,6 +1090,7 @@ def compute_majority_state(buffer: list) -> dict:
 async def cv_handler(websocket):
     valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
     locked_resources: dict | None = None  # set once board is stable; skips tile re-classification
+    tiles_locked: bool = False
     majority: dict = {
         "buffer_size":       0,
         "valid_count":       0,
@@ -1113,14 +1114,15 @@ async def cv_handler(websocket):
                     majority["buffer_size"] = n
                     majority["valid_count"] = n
                     majority["is_stable"]   = n == FRAME_BUFFER_SIZE
-                    if majority["is_stable"] and not prev_full:
-                        # First time buffer is full: elect the final board layout and lock it
+                    if majority["is_stable"] and not tiles_locked:
+                        # Buffer just filled: elect the final board layout and lock it
                         majority.update(compute_majority_state(list(valid_buffer)))
                         locked_resources = {
                             (t["row"], t["col"]): t["resource"]
                             for t in majority["tile_results"]
                         }
-                    elif majority["is_stable"]:
+                        tiles_locked = True
+                    elif tiles_locked:
                         # Board locked — only refresh piece detections each frame
                         majority["vertex_colors"] = state.get("vertex_colors", [])
                         majority["edge_colors"]   = state.get("edge_colors", [])
