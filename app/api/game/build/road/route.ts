@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildRoad } from "@/backend/gamelogic/playerstatmanagement/playerstatmanagement";
+import { buildRoad, updatePlayerLongestRoadLengths } from "@/backend/gamelogic/playerstatmanagement/playerstatmanagement";
 import { games } from "@/app/lib/games";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -12,6 +12,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 { status: 400 }
             );
         }
+        updatePlayerLongestRoadLengths(newGameState);
         games.set(newGameState.gameId, newGameState);
         return NextResponse.json(
             { success: true, data: newGameState },
