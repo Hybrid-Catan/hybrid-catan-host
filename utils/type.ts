@@ -11,7 +11,7 @@ import { CVBoardState } from "./boardState";
  * - BUILD: player is placing roads, settlements, cities, or buying dev cards.
  * - END: player signals end of turn; control passes to the next player.
  */
-export type phase = "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "END";
+export type phase = "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "ROBBER" | "END";
 
 /**
  * Resource types
@@ -125,7 +125,7 @@ export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
     "players": Player[],// in queue
-    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "ROAD_BUILDING" | "END",
+    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "ROAD_BUILDING" | "ROBBER" | "END",
     "dice": {
         "sum": number
     },

@@ -744,15 +744,23 @@ export function canConfirmSetup(gameState: GameState): RuleResult {
  * Validates a proposed robber position.
  *
  * Rules enforced:
- *  1. Target must be a tile the CV has detected (spiralIndex matches).
- *  2. Robber cannot stay on the tile it already occupies — Catan requires you
- *     to move it when a 7 is rolled or a Knight is played.
+ *  1. Game must be in the ROBBER phase — players can only move the robber
+ *     after rolling a 7 or playing a Knight.
+ *  2. Target must be a tile the CV has detected (spiralIndex matches).
+ *  3. Robber cannot stay on the tile it already occupies.
  *
  * Adjacency / steal-target rules live in `getRobberStealTargets` so callers
  * can present a choice UI when more than one opponent has a building on an
  * adjacent vertex.
  */
 export function canPlaceRobber(targetTileIdx: number, gameState: GameState): RuleResult {
+    if (gameState.phase !== "ROBBER") {
+        return {
+            valid: false,
+            reason: "You can only move the robber when you've rolled a 7 or played a Knight card.",
+        };
+    }
+
     const cv = gameState.cvBoardState;
     if (!cv || !cv.tile_results) {
         return { valid: false, reason: "The board hasn't been detected yet. Make sure the camera can see the whole board." };
