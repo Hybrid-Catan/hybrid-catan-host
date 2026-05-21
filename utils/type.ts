@@ -154,6 +154,12 @@ export type GameState = {
      * map is empty, then transitions to ROBBER.
      */
     "pendingDiscards"?: Record<string, number>;
+    /**
+     * After the robber moves to a tile with multiple stealable opponents,
+     * the active player must pick which one to steal from. Holds those
+     * playerIds; cleared once /api/game/robber/steal resolves the choice.
+     */
+    "pendingStealCandidates"?: string[];
 }
 export type PlayerToResourceMap = {
     [playerId: string]: resourceCards;

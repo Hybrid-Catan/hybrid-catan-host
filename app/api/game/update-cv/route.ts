@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { games } from "@/app/lib/games";
 import { updatePlayerLongestRoadLengths } from "@/backend/gamelogic/playerstatmanagement/playerstatmanagement";
 import { validateBoardPlacements } from "@/backend/gamelogic/gamerules/gamerules";
-import { findDesertTileIndex } from "@/backend/gamelogic/robber/robber";
+import { findDesertTileIndex, applyDetectedRobberMove } from "@/backend/gamelogic/robber/robber";
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,6 +23,19 @@ export async function POST(req: NextRequest) {
         const desert = findDesertTileIndex(cvBoardState);
         if (desert !== null) {
             game.robber = { tileIndex: desert };
+        }
+    }
+    // CV-driven robber commit: when in ROBBER phase, watch for the physical
+    // pawn moving to a different tile. As soon as CV sees it on a new tile,
+    // commit the move via the rules engine (handles 0/1/2+ steal candidates).
+    if (game.phase === "ROBBER") {
+        const cvIdx = cvBoardState?.robber_tile_index;
+        if (
+            typeof cvIdx === "number" &&
+            cvIdx >= 0 &&
+            cvIdx !== game.robber?.tileIndex
+        ) {
+            applyDetectedRobberMove(game, cvIdx);
         }
     }
     updatePlayerLongestRoadLengths(game);

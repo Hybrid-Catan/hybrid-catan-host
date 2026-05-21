@@ -19,6 +19,88 @@ export function findDesertTileIndex(cv: CVBoardState | undefined): number | null
     return null;
 }
 
+/**
+ * Applies a CV-detected robber movement to the game state.
+ *
+ * Called from /api/game/update-cv when CV reports the robber on a new tile
+ * during the ROBBER phase. The physical-board move is the authoritative
+ * input — the player commits the move by *picking up and placing the pawn*
+ * rather than tapping a tile button.
+ *
+ * Steal handling:
+ *   - 0 candidates: robber moves, no steal, phase → BUFFER.
+ *   - 1 candidate:  auto-steal a random resource, phase → BUFFER.
+ *   - 2+ candidates: phase stays in ROBBER and pendingStealCandidates is
+ *                    populated so the active player can pick a target via
+ *                    /api/game/robber/steal.
+ */
+export function applyDetectedRobberMove(
+    gameState: GameState,
+    newTileIdx: number,
+): { gameState: GameState; stolenFrom: Player | null; stolenResource: keyof Player["resourceCards"] | null; awaitingChoice: boolean } {
+    gameState.robber = { tileIndex: newTileIdx };
+    const currentPlayer = gameState.players[0];
+    const candidates = getRobberStealTargets(gameState, newTileIdx, currentPlayer);
+
+    if (candidates.length === 0) {
+        gameState.phase = "BUFFER";
+        gameState.pendingStealCandidates = undefined;
+        return { gameState, stolenFrom: null, stolenResource: null, awaitingChoice: false };
+    }
+
+    if (candidates.length === 1) {
+        const target = candidates[0];
+        const stolen = stealRandomCard(currentPlayer, target);
+        gameState.phase = "BUFFER";
+        gameState.pendingStealCandidates = undefined;
+        return { gameState, stolenFrom: target, stolenResource: stolen, awaitingChoice: false };
+    }
+
+    // 2+ candidates — wait for the player to pick via /api/game/robber/steal
+    gameState.pendingStealCandidates = candidates.map(p => p.playerId);
+    return { gameState, stolenFrom: null, stolenResource: null, awaitingChoice: true };
+}
+
+/**
+ * Resolves a pending steal-target choice. Called by /api/game/robber/steal.
+ * Validates that targetPlayerId is in pendingStealCandidates, steals a random
+ * card, transitions phase → BUFFER, clears pendingStealCandidates.
+ */
+export function resolveStealChoice(
+    gameState: GameState,
+    targetPlayerId: string,
+): { valid: boolean; reason?: string; stolenFrom?: Player; stolenResource?: keyof Player["resourceCards"] | null } {
+    if (gameState.phase !== "ROBBER") {
+        return { valid: false, reason: "There's no robber move waiting to resolve." };
+    }
+    const candidates = gameState.pendingStealCandidates ?? [];
+    if (!candidates.includes(targetPlayerId)) {
+        return { valid: false, reason: "That player isn't a valid target — pick one of the candidates the robber's tile shows." };
+    }
+    const target = gameState.players.find(p => p.playerId === targetPlayerId);
+    if (!target) {
+        return { valid: false, reason: "Target player not found." };
+    }
+    const currentPlayer = gameState.players[0];
+    const stolen = stealRandomCard(currentPlayer, target);
+    gameState.phase = "BUFFER";
+    gameState.pendingStealCandidates = undefined;
+    return { valid: true, stolenFrom: target, stolenResource: stolen };
+}
+
+/** Steals one random resource (from those the target holds) into currentPlayer's hand. */
+function stealRandomCard(currentPlayer: Player, target: Player): keyof Player["resourceCards"] | null {
+    const available = (Object.entries(target.resourceCards) as Array<
+        [keyof Player["resourceCards"], number]
+    >).filter(([, count]) => count > 0);
+    if (available.length === 0) return null;
+    const pick = available[Math.floor(Math.random() * available.length)];
+    const key = pick[0];
+    target.resourceCards[key] -= 1;
+    currentPlayer.resourceCards[key] += 1;
+    return key;
+}
+
 export type PlaceRobberResult = {
     gameState: GameState;
     stolenFrom: Player | null;
