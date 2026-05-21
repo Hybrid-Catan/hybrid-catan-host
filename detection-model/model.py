@@ -37,7 +37,7 @@ PORT_COLORS = {
 }
 
 RESOURCES_BGR = {
-    "Hill": (np.array([20, 50, 113]), np.array([70, 95, 150])),
+    "Hills": (np.array([20, 50, 113]), np.array([70, 95, 150])),
     "Forest": (np.array([30, 65, 30]), np.array([60, 95, 60])),
     "Pasture": (np.array([35, 145, 120]), np.array([75, 185, 165])),
     "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),
@@ -134,7 +134,16 @@ def tf_classify_tile(avg_bgr_np):
         if tf.reduce_all((avg_tf >= tf.constant(lo, dtype=tf.float32)) &
                          (avg_tf <= tf.constant(hi, dtype=tf.float32))):
             return name
-    return "Desert"
+    # No exact range match — fall back to nearest neighbour by midpoint distance
+    avg_f = avg_bgr_np.astype(np.float32)
+    best_name, best_dist = "Desert", float('inf')
+    for name, (lo, hi) in RESOURCES_BGR.items():
+        mid  = (lo.astype(np.float32) + hi.astype(np.float32)) / 2
+        dist = float(np.linalg.norm(avg_f - mid))
+        if dist < best_dist:
+            best_dist = dist
+            best_name = name
+    return best_name
 
 def tf_hist_correlation(crop_hsv, tmpl_hsv, crop_mask, tmpl_mask):
     h_bins, s_bins = 50, 60
