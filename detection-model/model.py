@@ -883,6 +883,8 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 _, existing_id = _find_vertex_nearby(vx, vy)
                 if existing_id is not None:
                     existing = vertex_list[existing_id]
+                    if hex_idx not in existing["hexIndex"]:
+                        existing["hexIndex"].append(hex_idx)
                     if existing["color"] is None and lbl is not None:
                         existing["color"] = lbl
                 else:
@@ -890,7 +892,7 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                     key = (round(vx / DEDUP_TOL), round(vy / DEDUP_TOL))
                     vertex_seen[key] = vertex_id
                     vertex_list.append({"id": vertex_id, "cx": vx, "cy": vy,
-                                         "hexIndex": hex_idx, "color": lbl})
+                                         "hexIndex": [hex_idx], "color": lbl})
 
             for i in range(6):
                 a0 = np.deg2rad(30 + i * 60);       a1 = np.deg2rad(30 + (i + 1) * 60)
@@ -917,7 +919,7 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 else:
                     edge_seen[key] = len(edge_list)
                     edge_list.append({"cx": mx, "cy": my, "angle": round(ea, 1),
-                                       "hexIndex": hex_idx, "color": lbl,
+                                       "hexIndex": [hex_idx], "color": lbl,
                                        "vertexA": vertex_a_id,
                                        "vertexB": vertex_b_id})
 
