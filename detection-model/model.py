@@ -37,12 +37,12 @@ PORT_COLORS = {
 }
 
 RESOURCES_BGR = {
-    "Pasture":  (np.array([55, 130, 120]), np.array([115, 185, 175])),
-    "Mountain": (np.array([60,  75,  80]), np.array([120, 130, 135])),
-    "Field":    (np.array([30, 120, 155]), np.array([100, 170, 195])),
-    "Hills":    (np.array([30,  60,  95]), np.array([ 80, 110, 160])),
-    "Forest":   (np.array([25,  55,  35]), np.array([ 80, 110,  85])),
-    "Desert":   (np.array([95, 150, 165]), np.array([145, 190, 205])),
+    "Hill": (np.array([20, 50, 113]), np.array([70, 95, 150])),       #
+    "Forest": (np.array([30, 65, 30]), np.array([60, 95, 60])),  #
+    "Pasture": (np.array([35, 145, 120]), np.array([75, 185, 165])), #
+    "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),#
+    "Desert": (np.array([75, 155, 170]), np.array([115, 180, 240])), #
+    "Field": (np.array([30, 105, 150]), np.array([75, 145, 205])), 
 }
 RESOURCE_DRAW_COLORS = {
     "Pasture":  ( 80, 180,  80),
@@ -77,7 +77,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-FRAME_BUFFER_SIZE    = 30    # frames kept for majority-vote stable state
+FRAME_BUFFER_SIZE    = 10    # frames kept for majority-vote stable state
 
 # FIX 3: SAT_BOOST / VAL_BOOST moved to module level so _boost() can use them
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
@@ -308,14 +308,7 @@ def enhance_tile_contrast(img_bgr: np.ndarray) -> np.ndarray:
 
     return img_sharp
 
-RESOURCES_BGR = {
-    "Hill": (np.array([20, 50, 113]), np.array([70, 95, 150])),       #
-    "Forest": (np.array([30, 65, 35]), np.array([60, 95, 60])),  #
-    "Pasture": (np.array([40, 145, 120]), np.array([75, 185, 165])), #
-    "Mountain": (np.array([60, 70, 85]), np.array([95, 95, 105])),#
-    "Desert": (np.array([103, 165, 185]), np.array([115, 180, 240])), #
-    "Field": (np.array([30, 105, 150]), np.array([75, 145, 205])), 
-}
+
 
 i = 0
 
@@ -571,13 +564,13 @@ def place_numbers(overlay, tile_results, R):
         if number is None: continue
         label = str(number)
         col   = (0,0,220) if number in [6,8] else (20,20,20)
-        cv2.circle(final_board, (tx,ty), int(R*0.28), (230,225,200), -1)
-        cv2.circle(final_board, (tx,ty), int(R*0.28), (120,110,80),   1)
+        # cv2.circle(final_board, (tx,ty), int(R*0.28), (230,225,200), -1)
+        # cv2.circle(final_board, (tx,ty), int(R*0.28), (120,110,80),   1)
         scale = 0.55 if number >= 10 else 0.65
         (tw,th),_ = cv2.getTextSize(label, FONT, scale, 2)
         org = (tx-tw//2, ty+th//2)
-        cv2.putText(final_board, label, org, FONT, scale, (0,0,0), 3, cv2.LINE_AA)
-        cv2.putText(final_board, label, org, FONT, scale, col,     1, cv2.LINE_AA)
+        # cv2.putText(final_board, label, org, FONT, scale, (0,0,0), 3, cv2.LINE_AA)
+        # cv2.putText(final_board, label, org, FONT, scale, col,     1, cv2.LINE_AA)
     return final_board
 
 # ── Port detection ────────────────────────────────────────────────────────────
