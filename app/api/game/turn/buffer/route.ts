@@ -27,14 +27,14 @@ export async function POST(req: Request) {
     verticesByPlayer.get(normalizedColor)!.push(v);
   }
   type Gains = {
-    WOOD: number;
-    BRICK: number;
-    WOOL: number;
     WHEAT: number;
+    WOOD: number;
     ORE: number;
+    WOOL: number;
+    BRICK: number;
   };
   const RESOURCE_MAP: Record<string, keyof Gains | null> = {
-    Field: "WOOD",
+    Field: "WHEAT",
     Forest: "WOOD",
     Mountain: "ORE",
     Pasture: "WOOL",
