@@ -320,7 +320,7 @@ def enhance_tile_contrast(img_bgr: np.ndarray) -> np.ndarray:
 
 
 
-def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
+def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout, locked_resources=None):
     num_rows    = len(tile_layout)
     col_spacing = R * np.sqrt(3)
     row_spacing = R * 1.5
@@ -337,8 +337,11 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
         for t_idx in range(num_tiles):
             tx = int(row_start_x + t_idx * col_spacing)
             ty = int(row_y)
-            pixels, _ = get_pixels(tx, ty)
-            res = tf_classify_tile(np.mean(pixels, axis=0).astype(int)) if len(pixels) else "Desert"
+            if locked_resources is not None and (row_idx, t_idx) in locked_resources:
+                res = locked_resources[(row_idx, t_idx)]
+            else:
+                pixels, _ = get_pixels(tx, ty)
+                res = tf_classify_tile(np.mean(pixels, axis=0).astype(int)) if len(pixels) else "Desert"
             tile_results.append((row_idx, t_idx, tx, ty, res))
     return tile_results
 
@@ -758,7 +761,7 @@ def _error_frame(img, msg: str) -> bytes:
 
 # FIX 1+2+7: return type updated to 3-tuple; all early-exit paths return {}
 #             as the third element so callers never see a 2-tuple.
-def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
+def process_frame(jpg_bytes: bytes, locked_resources: dict | None = None) -> tuple[bytes, str, dict]:
     arr = np.frombuffer(jpg_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
@@ -819,7 +822,7 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
         R            = min((W - 2*PADDING) / ((max(tile_layout) + 0.5) * np.sqrt(3)),
                            (H - 2*PADDING) / (len(tile_layout) * 1.5 + 0.5))
         cx0, cy0     = W / 2, H / 2
-        tile_results = classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout)
+        tile_results = classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout, locked_resources)
 
         board   = draw_board(final_hex_crop, tile_results, R, H, W)
         overlay = draw_vertices_edges(board.copy(), final_hex_crop, tile_results, R, H, W)
@@ -1085,10 +1088,8 @@ def compute_majority_state(buffer: list) -> dict:
 # ── WebSocket server ──────────────────────────────────────────────────────────
 # FIX 5: duplicate/broken handler removed; single clean handler below
 async def cv_handler(websocket):
-    # All successfully-processed frames enter this buffer (validation skipped for testing).
     valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
-    # Initialised once; buffer_size/valid_count/is_stable updated cheaply each frame.
-    # compute_majority_state runs once when the buffer first fills.
+    locked_resources: dict | None = None  # set once board is stable; skips tile re-classification
     majority: dict = {
         "buffer_size":       0,
         "valid_count":       0,
@@ -1103,9 +1104,8 @@ async def cv_handler(websocket):
     try:
         async for message in websocket:
             if isinstance(message, bytes):
-                processed, status, state = process_frame(message)
+                processed, status, state = process_frame(message, locked_resources)
                 await websocket.send(processed)
-                # Always send JSON second message so client toggle stays in sync
                 if status == "ok":
                     prev_full = len(valid_buffer) == FRAME_BUFFER_SIZE
                     valid_buffer.append(state)
@@ -1114,7 +1114,16 @@ async def cv_handler(websocket):
                     majority["valid_count"] = n
                     majority["is_stable"]   = n == FRAME_BUFFER_SIZE
                     if majority["is_stable"] and not prev_full:
+                        # First time buffer is full: elect the final board layout and lock it
                         majority.update(compute_majority_state(list(valid_buffer)))
+                        locked_resources = {
+                            (t["row"], t["col"]): t["resource"]
+                            for t in majority["tile_results"]
+                        }
+                    elif majority["is_stable"]:
+                        # Board locked — only refresh piece detections each frame
+                        majority["vertex_colors"] = state.get("vertex_colors", [])
+                        majority["edge_colors"]   = state.get("edge_colors", [])
                     payload = dict(state)
                     payload["majority"] = majority
                     await websocket.send(json.dumps(payload).encode())
