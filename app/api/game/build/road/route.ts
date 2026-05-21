@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildRoad } from "@/backend/gamelogic/playerstatmanagement/playerstatmanagement";
+import { buildRoad, updatePlayerLongestRoadLengths } from "@/backend/gamelogic/playerstatmanagement/playerstatmanagement";
 import { games } from "@/app/lib/games";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -13,6 +13,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 { status: 400 }
             );
         }
+        updatePlayerLongestRoadLengths(newGameState);
         const after = newGameState.players[0].resourceCards;
         const resourceDelta = {
             WOOD: after.WOOD - before.WOOD,

@@ -8,6 +8,8 @@ import {
   hasPiecesRemaining
 } from "../gamerules/gamerules.ts";
 import { getTurnPlayerId } from "../turnmanagement/turnmanagement.ts";
+import { computeLongestRoad, type RoadEdge } from "./longestRoad.ts";
+import { CV_TO_GAME_COLOR } from "../../../utils/boardState.ts";
 
 type Resource = keyof Player["resourceCards"];
 type DevCard = keyof Player["developmentCards"];
@@ -445,9 +447,59 @@ export function updateLongestRoad(gameState: GameState): GameState {
     }
   }
   for (const p of gameState.players) {
+    const alreadyHas = p.achievements.hasLongestRoad;
     p.achievements.hasLongestRoad = p === owner;
+    if (p === owner && !alreadyHas) {
+      p.victoryPoints += 2;
+    }
+    if (p !== owner && alreadyHas) {
+      p.victoryPoints -= 2;
+    }
   }
   return { ...gameState };
+}
+
+/**
+ * Recomputes `longestRoadLength` for every player using the current CV board
+ * state, then runs `updateLongestRoad` to grant/revoke the achievement + VP.
+ *
+ * Call this whenever the CV board state changes (new road detected) or after
+ * a road-building action mutates the game state.
+ */
+export function updatePlayerLongestRoadLengths(gameState: GameState): GameState {
+  const cv = gameState.cvBoardState;
+  if (!cv) return updateLongestRoad(gameState);
+
+  // Group player-coloured edges by game color.
+  const roadsByColor = new Map<string, RoadEdge[]>();
+  for (const edge of cv.edge_colors ?? []) {
+    if (!edge.color) continue;
+    const gameColor = CV_TO_GAME_COLOR[edge.color];
+    if (!gameColor) continue;
+    if (edge.vertexA < 0 || edge.vertexB < 0) continue;
+    if (!roadsByColor.has(gameColor)) roadsByColor.set(gameColor, []);
+    roadsByColor.get(gameColor)!.push({ vertexA: edge.vertexA, vertexB: edge.vertexB });
+  }
+
+  // Vertex ID → owner game color (first seen wins).
+  const vertexOwner = new Map<number, string>();
+  for (const v of cv.vertex_colors ?? []) {
+    if (!v.color) continue;
+    const gameColor = CV_TO_GAME_COLOR[v.color];
+    if (!gameColor) continue;
+    if (!vertexOwner.has(v.id)) vertexOwner.set(v.id, gameColor);
+  }
+
+  for (const player of gameState.players) {
+    const roads = roadsByColor.get(player.color) ?? [];
+    const blocked = new Set<number>();
+    for (const [vid, ownerColor] of vertexOwner) {
+      if (ownerColor !== player.color) blocked.add(vid);
+    }
+    player.achievements.longestRoadLength = computeLongestRoad(roads, blocked);
+  }
+
+  return updateLongestRoad(gameState);
 }
 
 export function getVictoryPoints(player: Player): number {
