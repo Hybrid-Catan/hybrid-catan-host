@@ -14,8 +14,11 @@ export async function POST(req: Request) {
     dice: { sum, d1, d2 },
   };
   const tileMap = new Map<number, any>(
-    boardState.tile_results.map((t: any) => [t.spiralIndex, t])
+    boardState.tile_results
+      .filter((t: any) => typeof t.spiralIndex === "number")
+      .map((t: any) => [t.spiralIndex, t])
   );
+  // console.log("tileMap:", tileMap);
   const verticesByPlayer = new Map<string, any[]>();
   for (const v of boardState.vertex_colors) {
     if (!v.color) continue;
@@ -38,7 +41,7 @@ export async function POST(req: Request) {
     Forest: "WOOD",
     Mountain: "ORE",
     Pasture: "WOOL",
-    Hill: "BRICK",
+    Hills: "BRICK",
     Desert: null,
     Water: null,
   };
@@ -60,16 +63,27 @@ export async function POST(req: Request) {
       ORE: 0,
     };
     for (const vertex of ownedVertices) {
-      const tile = tileMap.get(vertex.hexIndex);
-      if (!tile) continue;
-      if (tile.number !== sum) continue;
-      const resource = RESOURCE_MAP[tile.resource] as keyof Gains | null;
-      if (!resource) continue;
-      gains[resource] += 1;
-      totalGains[resource] += 1;
+      const hexes: number[] = Array.isArray(vertex.hexIndices)
+        ? vertex.hexIndices
+        : Array.isArray(vertex.hexIndex)
+          ? vertex.hexIndex
+          : typeof vertex.hexIndex === "number"
+            ? [vertex.hexIndex]
+            : [];
+
+      for (const hexIndex of hexes) {
+        const tile = tileMap.get(hexIndex);
+        if (!tile) continue;
+        if (tile.number !== sum) continue;
+        const resource = RESOURCE_MAP[tile.resource] as keyof Gains | null;
+        if (!resource) continue;
+        gains[resource] += 1;
+        totalGains[resource] += 1;
+      }
     }
-    resourceMap[player.playerId] = gains;
+    resourceMap[String(player.playerId)] = gains;
   }
+  console.log(resourceMap)
   const bank = { ...newGameState.bank.resourceCards };
   for (const key of Object.keys(totalGains) as (keyof typeof totalGains)[]) {
     bank[key] -= totalGains[key];

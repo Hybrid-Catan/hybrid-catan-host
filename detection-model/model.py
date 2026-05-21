@@ -855,6 +855,20 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
         DEDUP_TOL = 8
         vertex_list, edge_list = [], []
         vertex_seen, edge_seen = {}, {}
+
+        def _find_vertex_nearby(vx_int, vy_int):
+            """Return existing vertex_id matching this position, checking the
+            ±1 snap-cell neighbourhood. Shared corners on adjacent hexes can
+            land on different sides of a snap boundary by 1px due to int()
+            truncation, so we look slightly wider than the base key."""
+            base_kx = round(vx_int / DEDUP_TOL)
+            base_ky = round(vy_int / DEDUP_TOL)
+            for dkx in (0, -1, 1):
+                for dky in (0, -1, 1):
+                    k = (base_kx + dkx, base_ky + dky)
+                    if k in vertex_seen:
+                        return k, vertex_seen[k]
+            return (base_kx, base_ky), None
         for _, _, tx, ty, _ in tile_results:
             hex_idx = next(
                 (bt["spiralIndex"] for bt in board_tiles
@@ -864,18 +878,23 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
             for i in range(6):
                 a  = np.deg2rad(30 + i * 60)
                 vx, vy = int(tx + R * np.cos(a)), int(ty + R * np.sin(a))
-                key = (round(vx / DEDUP_TOL), round(vy / DEDUP_TOL))
                 sm = np.zeros((H, W), dtype=np.uint8)
                 cv2.circle(sm, (vx, vy), 4, 255, -1)
                 sat_mean = saturated_pixel_mean(final_hex_crop, sm)
                 lbl = classify_sample(sat_mean, "triangle") if sat_mean else None
-                if key in vertex_seen:
-                    existing = vertex_list[vertex_seen[key]]
+                _, existing_id = _find_vertex_nearby(vx, vy)
+                if existing_id is not None:
+                    existing = vertex_list[existing_id]
+                    if hex_idx not in existing["hexIndex"]:
+                        existing["hexIndex"].append(hex_idx)
                     if existing["color"] is None and lbl is not None:
                         existing["color"] = lbl
                 else:
-                    vertex_seen[key] = len(vertex_list)
-                    vertex_list.append({"cx": vx, "cy": vy, "hexIndex": hex_idx, "color": lbl})
+                    vertex_id = len(vertex_list)
+                    key = (round(vx / DEDUP_TOL), round(vy / DEDUP_TOL))
+                    vertex_seen[key] = vertex_id
+                    vertex_list.append({"id": vertex_id, "cx": vx, "cy": vy,
+                                         "hexIndex": [hex_idx], "color": lbl})
 
             for i in range(6):
                 a0 = np.deg2rad(30 + i * 60);       a1 = np.deg2rad(30 + (i + 1) * 60)
@@ -883,6 +902,12 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 vx1, vy1 = tx + R * np.cos(a1), ty + R * np.sin(a1)
                 mx, my   = int((vx0 + vx1) / 2),   int((vy0 + vy1) / 2)
                 ea       = float(np.degrees(np.arctan2(vy1 - vy0, vx1 - vx0)))
+                # Look up the two endpoint vertex IDs (with ±1 cell tolerance,
+                # same as the vertex loop) so connected edges share IDs.
+                _, vertex_a_id = _find_vertex_nearby(int(vx0), int(vy0))
+                _, vertex_b_id = _find_vertex_nearby(int(vx1), int(vy1))
+                if vertex_a_id is None: vertex_a_id = -1
+                if vertex_b_id is None: vertex_b_id = -1
                 key = (round(mx / DEDUP_TOL), round(my / DEDUP_TOL))
                 sm       = np.zeros((H, W), dtype=np.uint8)
                 cv2.fillPoly(sm, [cv2.boxPoints(
@@ -896,7 +921,9 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 else:
                     edge_seen[key] = len(edge_list)
                     edge_list.append({"cx": mx, "cy": my, "angle": round(ea, 1),
-                                       "hexIndex": hex_idx, "color": lbl})
+                                       "hexIndex": [hex_idx], "color": lbl,
+                                       "vertexA": vertex_a_id,
+                                       "vertexB": vertex_b_id})
 
         port_list = []
         for cx, cy, port_label, _, _ in port_results:

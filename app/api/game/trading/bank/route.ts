@@ -17,10 +17,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: `Bank has no ${get}` }, { status: 400 });
     }
 
+    const before = { ...sender.resourceCards };
     const newGameState = bankTrade(gameState, senderId, give, get);
+    const after = newGameState.players.find((p: any) => p.playerId === senderId)!.resourceCards;
+    const resourceDelta = {
+      WOOD: after.WOOD - before.WOOD,
+      BRICK: after.BRICK - before.BRICK,
+      WOOL: after.WOOL - before.WOOL,
+      WHEAT: after.WHEAT - before.WHEAT,
+      ORE: after.ORE - before.ORE,
+    };
     games.set(newGameState.gameId, newGameState);
 
-    return NextResponse.json({ success: true, data: newGameState });
+    return NextResponse.json({ success: true, data: newGameState, resourceDelta });
   } catch (error) {
     return NextResponse.json({ success: false, error: "Invalid request" }, { status: 500 });
   }
