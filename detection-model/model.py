@@ -95,6 +95,73 @@ COLOR_TOLERANCE    = 15
 EXCLUDE_SAND_BGR   = np.array([170, 215, 230], dtype=np.float32)
 SAND_EXCLUSION_THR = 35
 
+# ── Robber tracker config ─────────────────────────────────────────────────────
+ROBBER_HISTORY_LEN   = 60
+ROBBER_BASELINE_FRAC = 0.50
+ROBBER_CURRENT_FRAC  = 0.25
+ROBBER_DARKEN_THRESH = 18
+ROBBER_MIN_HISTORY   = 20
+
+# ── RobberTracker ─────────────────────────────────────────────────────────────
+class RobberTracker:
+    """Infers robber position from per-tile BGR darkening history."""
+
+    def __init__(self):
+        self._history: dict[int, deque] = {}
+        self._robber_spiral: int | None = None
+
+    def update(self, spiral_index: int, bgr: tuple):
+        if spiral_index not in self._history:
+            self._history[spiral_index] = deque(maxlen=ROBBER_HISTORY_LEN)
+        self._history[spiral_index].append(bgr)
+
+    @staticmethod
+    def _bgr_to_v(bgr_vec: np.ndarray) -> float:
+        px = np.clip(bgr_vec, 0, 255).astype(np.uint8)
+        return float(cv2.cvtColor(px.reshape(1, 1, 3),
+                                  cv2.COLOR_BGR2HSV)[0, 0, 2])
+
+    def infer_robber(self, board_tiles: list) -> int | None:
+        resource_of: dict[int, str] = {
+            t["spiralIndex"]: t.get("resource", "")
+            for t in board_tiles
+            if t.get("spiralIndex") is not None
+        }
+
+        if self._robber_spiral is None:
+            candidates = {si for si, res in resource_of.items()
+                          if res == "Desert"}
+            if not candidates:
+                candidates = set(resource_of.keys())
+        else:
+            candidates = set(resource_of.keys())
+
+        best_si, best_delta = None, 0.0
+        for si in candidates:
+            hist = self._history.get(si)
+            if hist is None or len(hist) < ROBBER_MIN_HISTORY:
+                continue
+            arr = np.array(hist, dtype=np.float32)
+            n   = len(arr)
+            nb  = max(1, int(n * ROBBER_BASELINE_FRAC))
+            nc  = max(1, int(n * ROBBER_CURRENT_FRAC))
+            baseline_v = self._bgr_to_v(arr[:nb].mean(axis=0))
+            current_v  = self._bgr_to_v(arr[n-nc:].mean(axis=0))
+            delta_v    = baseline_v - current_v
+            if delta_v > best_delta:
+                best_delta = delta_v
+                best_si    = si
+
+        if best_si is not None and best_delta >= ROBBER_DARKEN_THRESH:
+            self._robber_spiral = best_si
+
+        return self._robber_spiral
+
+    def reset(self):
+        self._history.clear()
+        self._robber_spiral = None
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def hex_to_bgr(h):
     h = h.lstrip('#')
@@ -492,47 +559,6 @@ def draw_vertices_edges(overlay, final_hex_crop, tile_results, R, H, W):
                 draw_lbl(overlay, int(mx+14*np.cos(perp)), int(my+14*np.sin(perp)), lbl)
     return overlay
 
-# ── Robber detection ──────────────────────────────────────────────────────────
-def detect_robber(img, tile_results, R):
-    # Restrict search to tile interiors only. Roads sit on tile boundaries and
-    # settlements on vertices — both produce dark blobs the old detector would
-    # snap to the nearest tile and report as a robber. The interior mask
-    # (~0.5*R radius hex per tile) covers where a real robber actually sits
-    # and excludes shadows that leak in from edge pieces.
-    H, W = img.shape[:2]
-    interior_mask = np.zeros((H, W), dtype=np.uint8)
-    for _, _, tx, ty, _ in tile_results:
-        pts = np.array([[int(tx + R * 0.5 * np.cos(np.radians(30 + i*60))),
-                         int(ty + R * 0.5 * np.sin(np.radians(30 + i*60)))]
-                         for i in range(6)], dtype=np.int32)
-        cv2.fillPoly(interior_mask, [pts], 255)
-    raw = cv2.morphologyEx(cv2.inRange(img, ROBBER_LOWER, ROBBER_UPPER),
-                           cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
-    mask = cv2.bitwise_and(raw, raw, mask=interior_mask)
-
-    # Scale min-area with tile size so it adapts if the warp canvas changes.
-    # 0.05 * R^2 ≈ 280px for R≈75 — comfortably below real-robber blob sizes
-    # (350-400px on our fixtures) and above shadow/feature noise (≤290px).
-    MIN_AREA = int(0.05 * R * R)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours: return None
-    area_cap = 2.6 * R * R * ROBBER_MAX_AREA_FRAC
-    valid = [c for c in contours
-             if MIN_AREA <= cv2.contourArea(c) < area_cap]
-    if not valid: return None
-    M = cv2.moments(max(valid, key=cv2.contourArea))
-    if M["m00"] == 0: return None
-    rx, ry   = int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
-    best, md = None, float('inf')
-    for _, _, tx, ty, _ in tile_results:
-        d = np.hypot(rx-tx, ry-ty)
-        if d < md: md = d; best = (tx, ty)
-    # The robber pawn sits near tile centre. Real fixtures show 3-10px offset;
-    # anything past 30% of R is almost certainly a shadow/feature being snapped
-    # to the wrong tile.
-    if best is None or md > R * 0.3:
-        return None
-    return best, (rx, ry)
 
 # ── Number placement ──────────────────────────────────────────────────────────
 def place_numbers(overlay, tile_results, R):
@@ -756,13 +782,12 @@ def _error_frame(img, msg: str) -> bytes:
     cv2.putText(out, msg, (20, 50), FONT, 0.8, (0, 80, 255), 2, cv2.LINE_AA)
     return _encode(out)
 
-# FIX 1+2+7: return type updated to 3-tuple; all early-exit paths return {}
-#             as the third element so callers never see a 2-tuple.
-def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
+def process_frame(jpg_bytes: bytes,
+                  robber_tracker: "RobberTracker | None" = None
+                  ) -> tuple[bytes, str, dict]:
     arr = np.frombuffer(jpg_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        # FIX 7: empty dict as third value
         return _error_frame(None, "Failed to decode frame"), "decode_error", {}
 
     l, a, b  = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2LAB))
@@ -782,17 +807,10 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
         (tw, th), _ = cv2.getTextSize(msg, FONT, 1.2, 2)
         cv2.rectangle(out, (16, 16), (36 + tw, 36 + th), (0, 0, 0), -1)
         cv2.putText(out, msg, (24, 24 + th), FONT, 1.2, (0, 80, 255), 2, cv2.LINE_AA)
-        # FIX 7: empty dict as third value
         return _encode(out), "no_board", {}
 
     try:
         center      = np.mean(hex_points, axis=0)[0]
-        # Sort corners clockwise from "top" instead of by raw atan2. atan2's
-        # discontinuity is at the horizontal-left direction, which is right
-        # where a flat-top hex has its LEFT corner — tiny camera tilt flips
-        # that corner between first and last in sort order, rotating the
-        # entire warp by 60° across frames. Measuring CW from straight up
-        # puts the discontinuity at the (cornerless) top centreline instead.
         def _cw_from_top(p):
             dx, dy = p[0][0] - center[0], p[0][1] - center[1]
             a = np.arctan2(dx, -dy)
@@ -800,8 +818,6 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
         sorted_hex  = sorted(hex_points, key=_cw_from_top)
         src_pts     = np.array(sorted_hex).reshape(6, 2).astype(np.float32)
         size        = 440
-        # dst angles matched to the CW-from-top order: src[0] is TOP-RIGHT,
-        # which corresponds to dst angle 300° in image coords (math y flipped).
         dst_pts     = np.array([[size + size*np.cos(np.radians(a)),
                                   size + size*np.sin(np.radians(a))]
                                  for a in [300, 0, 60, 120, 180, 240]],
@@ -824,28 +840,8 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
         board   = draw_board(final_hex_crop, tile_results, R, H, W)
         overlay = draw_vertices_edges(board.copy(), final_hex_crop, tile_results, R, H, W)
 
-        robber_data = detect_robber(final_hex_crop, tile_results, R)
-        if robber_data:
-            (tx, ty), (rx, ry) = robber_data
-            cv2.circle(overlay, (rx, ry), 15, (0, 0, 0),       -1)
-            cv2.circle(overlay, (rx, ry), 15, (255, 255, 255),   2)
-            (tw, th), _ = cv2.getTextSize("ROBBER", FONT, 0.6, 2)
-            cv2.rectangle(overlay,
-                          (tx-tw//2-5, ty-th//2-5),
-                          (tx+tw//2+5, ty+th//2+5), (0, 0, 0), -1)
-            cv2.putText(overlay, "ROBBER", (tx-tw//2, ty+th//2),
-                        FONT, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
-
-        final_board2       = place_numbers(overlay, tile_results, R)
-        blobs              = detect_port_blobs(final_hex_crop, tile_results, R)
-        # FIX 4: unpack both return values from draw_ports
-        result, port_results = draw_ports(final_board2.copy(), blobs, R, H, W)
-
-        # ── Build board state payload ─────────────────────────────────────
-        # FIX 1+2: this block is now correctly indented inside the try,
-        #           and the return below replaces the old single-value return.
+        # ── Build board_tiles (needed before robber tracking) ─────────────
         spiral_lookup = {pos: i for i, pos in enumerate(CATAN_SPIRAL_POSITIONS)}
-
         board_tiles   = []
         number_iter2  = iter(CATAN_SPIRAL_NUMBERS)
         seen2         = set()
@@ -869,28 +865,49 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 "number":      number,
             })
 
-        # Robber tile index
-        robber_idx = None
-        if robber_data:
-            (rtx, rty), _ = robber_data
-            robber_idx = next(
-                (bt["spiralIndex"] for bt in board_tiles
-                 if bt["cx"] == rtx and bt["cy"] == rty),
-                None
-            )
+        # ── Feed tracker and infer robber ─────────────────────────────────
+        if robber_tracker is not None:
+            for tile in board_tiles:
+                si  = tile.get("spiralIndex")
+                if si is None:
+                    continue
+                tx_t, ty_t = tile["cx"], tile["cy"]
+                sm = hex_mask_fn(tx_t, ty_t, R * 0.25, (H, W))
+                ys, xs = np.where(sm == 255)
+                if len(xs):
+                    bgr_mean = tuple(int(v) for v in
+                                     final_hex_crop[ys, xs].mean(axis=0))
+                    robber_tracker.update(si, bgr_mean)
+            robber_spiral = robber_tracker.infer_robber(board_tiles)
+        else:
+            robber_spiral = None
 
-        # Vertex and edge color samples. Adjacent hexes share vertices/edges,
-        # so dedupe by rounded position — otherwise each shared edge appears
-        # twice and each shared vertex up to three times.
+        robber_idx = robber_spiral
+        if robber_spiral is not None:
+            robber_tile = next(
+                (t for t in board_tiles if t["spiralIndex"] == robber_spiral), None
+            )
+            if robber_tile:
+                rtx, rty = robber_tile["cx"], robber_tile["cy"]
+                cv2.circle(overlay, (rtx, rty), 15, (0, 0, 0),       -1)
+                cv2.circle(overlay, (rtx, rty), 15, (255, 255, 255),   2)
+                (tw, th), _ = cv2.getTextSize("ROBBER", FONT, 0.6, 2)
+                cv2.rectangle(overlay,
+                              (rtx-tw//2-5, rty-th//2-5),
+                              (rtx+tw//2+5, rty+th//2+5), (0, 0, 0), -1)
+                cv2.putText(overlay, "ROBBER", (rtx-tw//2, rty+th//2),
+                            FONT, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+
+        final_board2         = place_numbers(overlay, tile_results, R)
+        blobs                = detect_port_blobs(final_hex_crop, tile_results, R)
+        result, port_results = draw_ports(final_board2.copy(), blobs, R, H, W)
+
+        # ── Vertex / edge colour samples ──────────────────────────────────
         DEDUP_TOL = 8
         vertex_list, edge_list = [], []
         vertex_seen, edge_seen = {}, {}
 
         def _find_vertex_nearby(vx_int, vy_int):
-            """Return existing vertex_id matching this position, checking the
-            ±1 snap-cell neighbourhood. Shared corners on adjacent hexes can
-            land on different sides of a snap boundary by 1px due to int()
-            truncation, so we look slightly wider than the base key."""
             base_kx = round(vx_int / DEDUP_TOL)
             base_ky = round(vy_int / DEDUP_TOL)
             for dkx in (0, -1, 1):
@@ -899,6 +916,7 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                     if k in vertex_seen:
                         return k, vertex_seen[k]
             return (base_kx, base_ky), None
+
         for _, _, tx, ty, _ in tile_results:
             hex_idx = next(
                 (bt["spiralIndex"] for bt in board_tiles
@@ -932,8 +950,6 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 vx1, vy1 = tx + R * np.cos(a1), ty + R * np.sin(a1)
                 mx, my   = int((vx0 + vx1) / 2),   int((vy0 + vy1) / 2)
                 ea       = float(np.degrees(np.arctan2(vy1 - vy0, vx1 - vx0)))
-                # Look up the two endpoint vertex IDs (with ±1 cell tolerance,
-                # same as the vertex loop) so connected edges share IDs.
                 _, vertex_a_id = _find_vertex_nearby(int(vx0), int(vy0))
                 _, vertex_b_id = _find_vertex_nearby(int(vx1), int(vy1))
                 if vertex_a_id is None: vertex_a_id = -1
@@ -967,46 +983,33 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
             vertex_colors     = vertex_list,
             edge_colors       = edge_list,
         )
-
-        # FIX 1+2: return 3-tuple with state dict; replaces old 2-tuple return
         return _encode(result), "ok", asdict(state)
 
     except Exception as e:
         print(f"[CV] Pipeline error: {e}")
-        # FIX 7: empty dict as third value
         return _error_frame(img, f"Error: {str(e)[:80]}"), "error", {}
+
 
 def test_image(image_path: str, output_path: str = "test_output.jpg"):
     with open(image_path, "rb") as f:
         jpg_bytes = f.read()
-
-    # FIX 6: unpack 3 values; ignore the state dict with _
     result_bytes, status, _ = process_frame(jpg_bytes)
-
     with open(output_path, "wb") as f:
         f.write(result_bytes)
-
     print(f"Status: {status}")
     print(f"Output saved to: {output_path}")
 
 # ── Valid board state filter ──────────────────────────────────────────────────
 VALID_RESOURCE_COUNTS = {"Forest": 4, "Pasture": 4, "Field": 4, "Hills": 3, "Mountain": 3, "Desert": 1}
 
-
 def is_valid_board_state(state: dict) -> bool:
-    """Return True only when the 19 detected tiles match the standard Catan distribution."""
     tiles = state.get("tile_results", [])
     if len(tiles) != 19:
         return False
     counts = Counter(t.get("resource") for t in tiles)
     return all(counts.get(res, 0) == n for res, n in VALID_RESOURCE_COUNTS.items())
 
-
 def compute_majority_state(buffer: list) -> dict:
-    """Elect the most common complete board layout from a buffer of pre-validated states.
-    All frames in the buffer have already passed is_valid_board_state."""
-
-    # Elect the most common complete board layout
     config_votes: Counter = Counter()
     config_state: dict = {}
     for state in buffer:
@@ -1018,7 +1021,6 @@ def compute_majority_state(buffer: list) -> dict:
     best_key = config_votes.most_common(1)[0][0]
     best_tiles = config_state[best_key].get("tile_results", [])
 
-    # Majority-vote dynamic fields across all frames in the buffer
     robber_votes: Counter = Counter(
         s.get("robber_tile_index")
         for s in buffer
@@ -1081,39 +1083,31 @@ def compute_majority_state(buffer: list) -> dict:
         "edge_colors":       majority_edges,
     }
 
-
 # ── WebSocket server ──────────────────────────────────────────────────────────
-# FIX 5: duplicate/broken handler removed; single clean handler below
 async def cv_handler(websocket):
-    # All successfully-processed frames enter this buffer (validation skipped for testing).
     valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
-    # Initialised once; buffer_size/valid_count/is_stable updated cheaply each frame.
-    # compute_majority_state runs once when the buffer first fills.
-    majority: dict = {
-        "buffer_size":       0,
-        "valid_count":       0,
-        "is_stable":         False,
-        "tile_results":      [],
-        "port_results":      [],
-        "robber_tile_index": None,
-        "vertex_colors":     [],
-        "edge_colors":       [],
-    }
+    robber_tracker = RobberTracker()
     print(f"[CV] Client connected: {websocket.remote_address}")
     try:
         async for message in websocket:
             if isinstance(message, bytes):
-                processed, status, state = process_frame(message)
+                processed, status, state = process_frame(message, robber_tracker)
                 await websocket.send(processed)
-                # Always send JSON second message so client toggle stays in sync
                 if status == "ok":
-                    prev_full = len(valid_buffer) == FRAME_BUFFER_SIZE
                     valid_buffer.append(state)
                     n = len(valid_buffer)
-                    majority["buffer_size"] = n
-                    majority["valid_count"] = n
-                    majority["is_stable"]   = n == FRAME_BUFFER_SIZE
-                    if majority["is_stable"] and not prev_full:
+                    full = (n == FRAME_BUFFER_SIZE)
+                    majority: dict = {
+                        "buffer_size": n,
+                        "valid_count": n,
+                        "is_stable":   full,
+                        "tile_results":      [],
+                        "port_results":      [],
+                        "robber_tile_index": None,
+                        "vertex_colors":     [],
+                        "edge_colors":       [],
+                    }
+                    if full:
                         majority.update(compute_majority_state(list(valid_buffer)))
                     payload = dict(state)
                     payload["majority"] = majority
