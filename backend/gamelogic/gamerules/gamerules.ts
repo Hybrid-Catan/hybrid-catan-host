@@ -645,3 +645,97 @@ export function validateBoardPlacements(gameState: GameState): BoardWarning[] {
 
     return warnings;
 }
+
+/**
+ * Counts the player's CV-detected settlements and roads. Roads are deduped
+ * by sorted endpoint pair so a single physical edge counts once.
+ */
+function countPlayerPiecesFromCV(gameState: GameState, player: Player): { settlements: number; roads: number } {
+    const cv = gameState.cvBoardState;
+    if (!cv) return { settlements: 0, roads: 0 };
+    let settlements = 0;
+    for (const v of cv.vertex_colors ?? []) {
+        if (!v.color) continue;
+        if (CV_TO_GAME_COLOR[v.color] === player.color) settlements++;
+    }
+    const seen = new Set<string>();
+    let roads = 0;
+    for (const e of cv.edge_colors ?? []) {
+        if (!e.color) continue;
+        if (e.vertexA < 0 || e.vertexB < 0) continue;
+        if (CV_TO_GAME_COLOR[e.color] !== player.color) continue;
+        const key = `${Math.min(e.vertexA, e.vertexB)}-${Math.max(e.vertexA, e.vertexB)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        roads++;
+    }
+    return { settlements, roads };
+}
+
+/**
+ * Validates the active player has physically placed the settlement they're
+ * about to confirm during setup. Cumulative count: 1 by end of SETUP_1, 2 by
+ * end of SETUP_2.
+ */
+export function canConfirmSetupSettlement(gameState: GameState): RuleResult {
+    if (gameState.phase !== "SETUP_1" && gameState.phase !== "SETUP_2") {
+        return { valid: false, reason: "You can only confirm a setup settlement during the setup phase." };
+    }
+    const player = gameState.players[0];
+    if (!player) return { valid: false, reason: "No active player." };
+    if (!gameState.cvBoardState) {
+        return { valid: false, reason: "The board hasn't been detected yet. Make sure the camera can see your piece." };
+    }
+    const { settlements } = countPlayerPiecesFromCV(gameState, player);
+    const expected = gameState.phase === "SETUP_1" ? 1 : 2;
+    const roundLabel = gameState.phase === "SETUP_1" ? "first" : "second";
+    if (settlements < expected) {
+        return {
+            valid: false,
+            reason: `You haven't placed your ${roundLabel} settlement yet. Put a settlement piece down on an empty corner before confirming.`,
+        };
+    }
+    return { valid: true };
+}
+
+/**
+ * Validates that the current player has physically placed the pieces they
+ * are supposed to before ending their setup turn (settlement + road).
+ *
+ * Counts the active player's settlements and roads in the CV board state and
+ * compares against the cumulative count expected at this point:
+ *   - SETUP_1 (each player's first round): 1 settlement + 1 road by end of turn
+ *   - SETUP_2 (each player's second round): 2 settlements + 2 roads by end of turn
+ *
+ * Returns a beginner-friendly reason naming the missing piece so the UI can
+ * surface a tutor hint instead of silently letting the player advance.
+ */
+export function canConfirmSetup(gameState: GameState): RuleResult {
+    if (gameState.phase !== "SETUP_1" && gameState.phase !== "SETUP_2") {
+        return { valid: false, reason: "You can only confirm a setup turn during the setup phase." };
+    }
+    const player = gameState.players[0];
+    if (!player) return { valid: false, reason: "No active player." };
+    if (!gameState.cvBoardState) {
+        return { valid: false, reason: "The board hasn't been detected yet. Make sure the camera can see your piece." };
+    }
+
+    const { settlements, roads } = countPlayerPiecesFromCV(gameState, player);
+    const expectedSettlements = gameState.phase === "SETUP_1" ? 1 : 2;
+    const expectedRoads = gameState.phase === "SETUP_1" ? 1 : 2;
+    const roundLabel = gameState.phase === "SETUP_1" ? "first" : "second";
+
+    if (settlements < expectedSettlements) {
+        return {
+            valid: false,
+            reason: `You haven't placed your ${roundLabel} settlement yet. Put a settlement piece down on an empty corner before ending your turn.`,
+        };
+    }
+    if (roads < expectedRoads) {
+        return {
+            valid: false,
+            reason: `You haven't placed your ${roundLabel} road yet. Put a road piece next to your new settlement before ending your turn.`,
+        };
+    }
+    return { valid: true };
+}
