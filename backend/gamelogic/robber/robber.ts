@@ -1,45 +1,63 @@
-import { GameState, color } from "@/utils/type";
+import { GameState, Player } from "@/utils/type";
+import { getRobberStealTargets } from "../gamerules/gamerules";
 
+export type PlaceRobberResult = {
+    gameState: GameState;
+    stolenFrom: Player | null;
+    stolenResource: keyof Player["resourceCards"] | null;
+};
+
+/**
+ * Moves the robber to `robberPosition` and resolves the steal.
+ *
+ * Steal logic (Catan rules):
+ *  - The active player (gameState.players[0]) chooses a target from the
+ *    opponents who have at least one settlement/city on a vertex adjacent to
+ *    the new robber tile AND have at least one resource card to take.
+ *  - If `targetPlayerId` is provided and valid, that player is used.
+ *  - If `targetPlayerId` is null/invalid but only one valid target exists,
+ *    that target is used.
+ *  - If no valid target exists, the robber moves but nothing is stolen.
+ *  - The stolen resource is chosen randomly from the target's hand
+ *    (Catan rule: target is taken at random because the hand is hidden).
+ *
+ * Caller is responsible for validating with `canPlaceRobber` first.
+ */
 export function placeRobber(
     gameState: GameState,
-    robberPosition: number
-): GameState {
-
-    // 1. Move robber
-    let newGameState: GameState = {
+    robberPosition: number,
+    targetPlayerId?: string | null,
+): PlaceRobberResult {
+    const newGameState: GameState = {
         ...gameState,
-        robber: {
-            tileIndex: robberPosition
-        }
+        robber: { tileIndex: robberPosition },
     };
 
-    // 2. OPTIONAL: steal logic (simplified)
-    // Assume first player is current player
     const currentPlayer = newGameState.players[0];
+    const candidates = getRobberStealTargets(newGameState, robberPosition, currentPlayer);
 
-    // Find players to steal from (you’ll later base this on board + settlements)
-    const possibleTargets = newGameState.players.filter(
-        (p) => p.playerId !== currentPlayer.playerId
-    );
+    let target: Player | null = null;
+    if (targetPlayerId) {
+        target = candidates.find(p => p.playerId === targetPlayerId) ?? null;
+    }
+    if (!target && candidates.length === 1) {
+        target = candidates[0];
+    }
 
-    if (possibleTargets.length > 0) {
-        const target = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
-
-        // Get available resource types
-        const resources = Object.entries(target.resourceCards)
-            .filter(([_, count]) => count > 0);
-
-        if (resources.length > 0) {
-            const [resourceType] = resources[Math.floor(Math.random() * resources.length)];
-
-            // Transfer 1 resource
-            target.resourceCards[resourceType as keyof typeof target.resourceCards] -= 1;
-            currentPlayer.resourceCards[resourceType as keyof typeof currentPlayer.resourceCards] += 1;
+    let stolenResource: keyof Player["resourceCards"] | null = null;
+    if (target) {
+        const available = (Object.entries(target.resourceCards) as Array<
+            [keyof Player["resourceCards"], number]
+        >).filter(([, count]) => count > 0);
+        if (available.length > 0) {
+            const pick = available[Math.floor(Math.random() * available.length)];
+            stolenResource = pick[0];
+            target.resourceCards[stolenResource] -= 1;
+            currentPlayer.resourceCards[stolenResource] += 1;
         }
     }
 
-    // 3. Move phase forward (usually to BUFFER)
     newGameState.phase = "BUFFER";
 
-    return newGameState;
+    return { gameState: newGameState, stolenFrom: target, stolenResource };
 }
