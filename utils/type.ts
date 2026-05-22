@@ -11,7 +11,7 @@ import { CVBoardState } from "./boardState";
  * - BUILD: player is placing roads, settlements, cities, or buying dev cards.
  * - END: player signals end of turn; control passes to the next player.
  */
-export type phase = "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "END";
+export type phase = "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "DISCARD" | "ROBBER" | "END";
 
 /**
  * Resource types
@@ -125,7 +125,7 @@ export type GameState = {
     "gameId": string,
     "status": "SETUP" | "IN_PROGRESS" | "FINISHED",
     "players": Player[],// in queue
-    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "ROAD_BUILDING" | "END",
+    "phase": "INIT" | "SETUP_1" | "SETUP_2" | "ROLL" | "BUFFER" | "TRADE" | "BUILD" | "ROAD_BUILDING" | "DISCARD" | "ROBBER" | "END",
     "dice": {
         "sum": number
     },
@@ -147,6 +147,19 @@ export type GameState = {
     "cvBoardState": CVBoardState;
     /** Rule violations the CV pipeline detected. Populated by validateBoardPlacements. */
     "validationWarnings"?: BoardWarning[];
+    /**
+     * After a 7 is rolled, players with more than 7 cards must discard half.
+     * Maps playerId → number of cards still owed. Cleared once each player
+     * submits their discard. The game stays in the DISCARD phase until this
+     * map is empty, then transitions to ROBBER.
+     */
+    "pendingDiscards"?: Record<string, number>;
+    /**
+     * After the robber moves to a tile with multiple stealable opponents,
+     * the active player must pick which one to steal from. Holds those
+     * playerIds; cleared once /api/game/robber/steal resolves the choice.
+     */
+    "pendingStealCandidates"?: string[];
 }
 export type PlayerToResourceMap = {
     [playerId: string]: resourceCards;

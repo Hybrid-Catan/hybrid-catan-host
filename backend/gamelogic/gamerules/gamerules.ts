@@ -739,3 +739,79 @@ export function canConfirmSetup(gameState: GameState): RuleResult {
     }
     return { valid: true };
 }
+
+/**
+ * Validates a proposed robber position.
+ *
+ * Rules enforced:
+ *  1. Game must be in the ROBBER phase — players can only move the robber
+ *     after rolling a 7 or playing a Knight.
+ *  2. Target must be a tile the CV has detected (spiralIndex matches).
+ *  3. Robber cannot stay on the tile it already occupies.
+ *
+ * Adjacency / steal-target rules live in `getRobberStealTargets` so callers
+ * can present a choice UI when more than one opponent has a building on an
+ * adjacent vertex.
+ */
+export function canPlaceRobber(targetTileIdx: number, gameState: GameState): RuleResult {
+    if (gameState.phase !== "ROBBER") {
+        return {
+            valid: false,
+            reason: "You can only move the robber when you've rolled a 7 or played a Knight card.",
+        };
+    }
+
+    const cv = gameState.cvBoardState;
+    if (!cv || !cv.tile_results) {
+        return { valid: false, reason: "The board hasn't been detected yet. Make sure the camera can see the whole board." };
+    }
+
+    const tile = cv.tile_results.find(t => t.spiralIndex === targetTileIdx);
+    if (!tile) {
+        return { valid: false, reason: "That tile isn't on the board." };
+    }
+
+    const currentRobber = gameState.robber?.tileIndex;
+    if (currentRobber === targetTileIdx) {
+        return {
+            valid: false,
+            reason: "You have to move the robber to a different tile — it can't stay where it is.",
+        };
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Returns the players who can be the target of a robber-steal at `tileIdx`.
+ *
+ * A player is a valid target if they (a) own at least one settlement/city on
+ * a vertex adjacent to that tile (CV-detected), (b) are not the current
+ * player, and (c) have at least one resource card to steal. Order matches
+ * the order players appear in gameState.players (stable for tests and UI).
+ */
+export function getRobberStealTargets(
+    gameState: GameState,
+    tileIdx: number,
+    currentPlayer: Player,
+): Player[] {
+    const cv = gameState.cvBoardState;
+    if (!cv || !cv.vertex_colors) return [];
+
+    const adjacentVertices = cv.vertex_colors.filter(v => v.hexIndex === tileIdx);
+    const ownerColors = new Set<string>();
+    for (const v of adjacentVertices) {
+        if (!v.color) continue;
+        const game = CV_TO_GAME_COLOR[v.color];
+        if (game) ownerColors.add(game);
+    }
+
+    return gameState.players.filter(p => {
+        if (p.playerId === currentPlayer.playerId) return false;
+        if (!ownerColors.has(p.color)) return false;
+        const total =
+            p.resourceCards.WOOD + p.resourceCards.BRICK + p.resourceCards.WOOL +
+            p.resourceCards.WHEAT + p.resourceCards.ORE;
+        return total > 0;
+    });
+}

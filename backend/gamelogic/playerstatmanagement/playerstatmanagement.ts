@@ -291,6 +291,9 @@ export function playKnight(gameState: GameState): GameState | false {
   player.achievements.armySize += 1;
   updateLargestArmy(gameState);
   player.devCardPlayedThisTurn = true;
+  // Knight play means the player must now move the robber. The state machine
+  // sits in ROBBER until /api/game/robber/place resolves it.
+  gameState.phase = "ROBBER";
   return { ...gameState };
 }
 

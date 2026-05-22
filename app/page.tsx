@@ -267,6 +267,8 @@ export default function Host() {
   // FIX: throttle CV log entries to avoid flooding React state updates
   const lastCvLogRef = useRef(0);
 
+  const tilesLockedRef = useRef(false);
+
   const [stableState, setStableState] = useState<CVBoardState | null>(null);
   const [bufferInfo, setBufferInfo] = useState({ size: 0, validCount: 0, stable: false });
   const [boardTileTypes,  setBoardTileTypes]  = useState<TileType[] | undefined>(undefined);
@@ -434,9 +436,12 @@ export default function Host() {
               setBufferInfo({ size: maj.buffer_size ?? 0, validCount: maj.valid_count ?? 0, stable: maj.is_stable ?? false });
 
               if (maj.is_stable && stableBoard.tile_results.length > 0) {
-                const newTypes = cvStateToTileTypes(stableBoard);
-                setBoardTileTypes(prev => JSON.stringify(prev) === JSON.stringify(newTypes) ? prev : newTypes);
-
+                if (!tilesLockedRef.current) {
+                  // Lock tile layout on first stable frame — never update again
+                  tilesLockedRef.current = true;
+                  setBoardTileTypes(cvStateToTileTypes(stableBoard));
+                }
+                // Always update pieces so roads/settlements stay current
                 const { settlements: newS, roads: newR } = cvStateToPieces(stableBoard);
                 setBoardSettlements(prev => JSON.stringify(prev) === JSON.stringify(newS) ? prev : newS);
                 setBoardRoads(prev => JSON.stringify(prev) === JSON.stringify(newR) ? prev : newR);
@@ -492,6 +497,7 @@ export default function Host() {
     cvSocketRef.current?.close();
     cvSocketRef.current = null;
     cvExpectJsonRef.current = false;
+    tilesLockedRef.current = false;
     setCvStatus("idle");
   }
 

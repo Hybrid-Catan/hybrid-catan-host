@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { games } from "@/app/lib/games";
 import { CV_TO_GAME_COLOR } from "@/utils/boardState";
+import { computePendingDiscards } from "@/backend/gamelogic/robber/discard";
 
 export async function POST(req: Request) {
   const gameState = await req.json();
@@ -8,6 +9,27 @@ export async function POST(req: Request) {
   const d2 = Math.ceil(Math.random() * 6);
   const sum = d1 + d2;
   const boardState = gameState.cvBoardState;
+
+  // A roll of 7 short-circuits resource distribution and starts the
+  // discard → robber-move sequence. Players with >7 cards must discard half.
+  if (sum === 7) {
+    const pendingDiscards = computePendingDiscards(gameState.players);
+    const anyOwes = Object.keys(pendingDiscards).length > 0;
+    const after = {
+      ...gameState,
+      dice: { sum, d1, d2 },
+      phase: anyOwes ? "DISCARD" : "ROBBER",
+      pendingDiscards: anyOwes ? pendingDiscards : undefined,
+    };
+    if (after.gameId) games.set(after.gameId, after);
+    return NextResponse.json({
+      gameState: after,
+      dice: [d1, d2],
+      resourceMap: {},
+      pendingDiscards,
+    });
+  }
+
   let newGameState = {
     ...gameState,
     phase: "BUFFER",
