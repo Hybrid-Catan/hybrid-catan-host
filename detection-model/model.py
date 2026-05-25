@@ -90,7 +90,8 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-FRAME_BUFFER_SIZE    = 100
+SLOW_FRAME_BUFFER_SIZE    = 30
+FAST_FRAME_BUFFER_SIZE    = 5
 
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
 
@@ -1133,14 +1134,14 @@ def compute_majority_state(buffer: list) -> dict:
 
     robber_votes: Counter = Counter(
         s.get("robber_tile_index")
-        for s in buffer
+        for s in buffer[-FAST_FRAME_BUFFER_SIZE:]
         if s.get("robber_tile_index") is not None
     )
     majority_robber = robber_votes.most_common(1)[0][0] if robber_votes else None
 
     vertex_votes: dict = {}
     vertex_meta: dict = {}
-    for state in buffer:
+    for state in buffer[-FAST_FRAME_BUFFER_SIZE:]:
         for v in state.get("vertex_colors", []):
             key = (round(v["cx"] / 8) * 8, round(v["cy"] / 8) * 8)
             if key not in vertex_votes:
@@ -1155,7 +1156,7 @@ def compute_majority_state(buffer: list) -> dict:
 
     edge_votes: dict = {}
     edge_meta: dict = {}
-    for state in buffer:
+    for state in buffer[-FAST_FRAME_BUFFER_SIZE:]:
         for e in state.get("edge_colors", []):
             key = (round(e["cx"] / 8) * 8, round(e["cy"] / 8) * 8)
             if key not in edge_votes:
@@ -1196,7 +1197,7 @@ def compute_majority_state(buffer: list) -> dict:
 
 # ── WebSocket server ──────────────────────────────────────────────────────────
 async def cv_handler(websocket):
-    valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
+    valid_buffer: deque = deque(maxlen=SLOW_FRAME_BUFFER_SIZE)
     print(f"[CV] Client connected: {websocket.remote_address}")
     try:
         async for message in websocket:
