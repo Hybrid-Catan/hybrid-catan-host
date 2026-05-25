@@ -38,7 +38,7 @@ const TILE_CONFIG = {
   wheat:  { url: '/wheat.gltf',        color: 0xDAA520, offset: { x: 0, y: 0,  z: 0 }, scale: 1.15, rotation: Math.PI / 6 },
   desert: { url: '/desert.gltf',       color: 0xD2B48C, offset: { x: 0,     y: 0,  z: 0  }, scale: 1.15,  rotation: 0           },
   wood:   { url: '/wood.gltf',         color: 0x2D6A2D, offset: { x: 0,     y: 0, z: 0 }, scale: 1.15,  rotation: 0           },
-  brick:  { url: '/brick.gltf',        color: 0xC1440E, offset: { x: 0,  y: 0, z: 0 }, scale: 1.15, rotation: Math.PI / 6 },
+  brick:  { url: '/brick.gltf',        color: 0xA0522D, offset: { x: 0,  y: 0, z: 0 }, scale: 1.15, rotation: Math.PI / 6 },
 } as const;
 
 type TileType = keyof typeof TILE_CONFIG;
@@ -332,7 +332,9 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
             new THREE.BoxGeometry(0.15, 0.15, R),
             new THREE.MeshStandardMaterial({ color }),
           );
-          mesh.position.set(pos.x, 0, pos.z);
+          // Lift the road so it sits on top of the tile surface — at y=0 the
+          // bottom half is below the base and gets clipped by tile geometry.
+          mesh.position.set(pos.x, 0.12, pos.z);
           mesh.rotation.y = pos.rotation;
           piecesGroup.add(mesh);
         }

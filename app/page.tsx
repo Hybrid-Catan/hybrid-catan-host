@@ -439,13 +439,12 @@ export default function Host() {
             logCvState(state);
             setCvStatus("processing");
 
-            if (state.majority) {
-              const maj        = state.majority;
-              const stableBoard = parseBoardState(maj);
+            {
+              const stableBoard = bs;
               setStableState(stableBoard);
-              setBufferInfo({ size: maj.buffer_size ?? 0, validCount: maj.valid_count ?? 0, stable: maj.is_stable ?? false });
+              setBufferInfo({ size: state.buffer_size ?? 0, validCount: state.valid_count ?? 0, stable: state.is_stable ?? false });
 
-              if (maj.is_stable && stableBoard.tile_results.length > 0) {
+              if (state.is_stable && stableBoard.tile_results.length > 0) {
                 if (!tilesLockedRef.current) {
                   // Lock tile layout on first stable frame — never update again
                   tilesLockedRef.current = true;
