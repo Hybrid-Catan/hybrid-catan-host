@@ -1205,22 +1205,15 @@ async def cv_handler(websocket):
                 await websocket.send(processed)
                 if status == "ok":
                     valid_buffer.append(state)
-                    n = len(valid_buffer)
-                    full = (n == FRAME_BUFFER_SIZE)
                     majority: dict = {
-                        "buffer_size": n,
-                        "valid_count": n,
-                        "is_stable":   full,
                         "tile_results":      [],
                         "port_results":      [],
                         "robber_tile_index": None,
                         "vertex_colors":     [],
                         "edge_colors":       [],
                     }
-                    if full:
-                        majority.update(compute_majority_state(list(valid_buffer)))
-                    payload = dict(state)
-                    payload["majority"] = majority
+                    majority.update(compute_majority_state(list(valid_buffer)))
+                    payload = majority
                     await websocket.send(json.dumps(payload).encode())
                 else:
                     await websocket.send(json.dumps({"error": status}).encode())

@@ -425,7 +425,6 @@ export default function Host() {
                 cvBoardState: bs,
               }),
             });
-            addLog(bs.edge_colors?.map(e => e?.color?.toString()).toString() ?? "null", "warn")
             logCvState(state);
             setCvStatus("processing");
 

@@ -112,6 +112,7 @@ type Props = {
 export default function CatanBoard3D({ className, tileTypes, settlements, roads }: Props) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const updatePiecesRef = useRef<((s: SettlementInfo[], r: RoadInfo[]) => void) | null>(null);
+  const requestRenderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -135,13 +136,17 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
       const W = container.clientWidth  || 800;
       const H = container.clientHeight || 600;
 
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'low-power' });
       renderer.setSize(W, H);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping      = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.0;
       container.appendChild(renderer.domElement);
+
+      let needsRender = true;
+      const requestRender = () => { needsRender = true; };
+      requestRenderRef.current = requestRender;
 
       const scene  = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(75, W / H, 0.1, 100);
@@ -150,6 +155,7 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
 
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 0, 0);
+      controls.addEventListener('change', requestRender);
 
       const dirLight = new THREE.DirectionalLight(0xffffff, 1);
       dirLight.position.set(5, 10, 7);
@@ -177,7 +183,9 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
       scene.add(boardMesh);
 
       new THREE.TextureLoader().load('/background.png', (tex) => {
+        if (disposed) return;
         (boardMesh as any).material = new THREE.MeshBasicMaterial({ map: tex });
+        requestRender();
       });
 
       // ── addObject (render/src/objects.js) ────────────────────────────────────
@@ -213,6 +221,7 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
             const maxH = Math.max(sz.x, sz.z) / 2;
             wrapper.scale.setScalar((maxH > 0 ? tileInradius / maxH : 1) * scale);
             wrapper.add(model);
+            requestRender();
           });
           return wrapper;
         }
@@ -307,6 +316,7 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
           mesh.rotation.y = pos.rotation;
           piecesGroup.add(mesh);
         }
+        requestRender();
       }
 
       updatePiecesRef.current = updatePieces;
@@ -320,12 +330,20 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
         renderer.setSize(W, H);
         camera.aspect = W / H;
         camera.updateProjectionMatrix();
+        requestRender();
       });
       ro.observe(container);
 
-      // ── Render loop ───────────────────────────────────────────────────────────
+      const onVisChange = () => {
+        if (!document.hidden) requestRender();
+      };
+      document.addEventListener('visibilitychange', onVisChange);
+
       function animate() {
         animId = requestAnimationFrame(animate);
+        if (document.hidden) return;
+        if (!needsRender) return;
+        needsRender = false;
         controls.update();
         renderer.render(scene, camera);
       }
@@ -333,8 +351,12 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
 
       cleanup = () => {
         updatePiecesRef.current = null;
+        requestRenderRef.current = null;
         cancelAnimationFrame(animId);
         ro.disconnect();
+        document.removeEventListener('visibilitychange', onVisChange);
+        controls.removeEventListener('change', requestRender);
+        controls.dispose();
         dracoLoader.dispose();
         renderer.dispose();
         if (renderer.domElement.parentNode === container) container.removeChild(renderer.domElement);
