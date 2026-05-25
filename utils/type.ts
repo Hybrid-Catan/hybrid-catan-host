@@ -76,9 +76,9 @@ export type color = "BLUE" | "RED" | "WHITE" | "ORANGE";
  * beginner-friendly explanation suitable for showing in a tutor panel.
  */
 export type BoardWarning = {
-    type: "SETTLEMENT" | "ROAD";
-    playerColor: color;
-    position: { vertexId: number } | { vertexA: number; vertexB: number };
+    type: "SETTLEMENT" | "ROAD" | "ROBBER";
+    playerColor?: color;
+    position?: { vertexId: number } | { vertexA: number; vertexB: number } | { tileIndex: number };
     reason: string;
 };
 
