@@ -10,7 +10,11 @@ export type CVTile = {
     resource: "Pasture" | "Mountain" | "Field" | "Hills" | "Forest" | "Desert" | "Water";
     number: number | null;
 };
-export type CVPort = { cx: number; cy: number; label: string; resource: string };
+export type CVPort = {
+    cx: number; cy: number; label: string; resource: string;
+    row?: number;  col?: number;  cv_edge?: number;
+    row2?: number; col2?: number; cv_edge2?: number;
+};
 export type CVVertex = { id: number; cx: number; cy: number; hexIndex: number; color: string | null };
 export type CVEdge = {
     cx: number; cy: number; angle: number; hexIndex: number; color: string | null;
@@ -60,6 +64,12 @@ export function parseBoardState(state: Record<string, unknown>): CVBoardState {
         cy: p.cy as number,
         label: p.label as string,
         resource: p.resource as string,
+        row:      p.row      != null ? (p.row      as number) : undefined,
+        col:      p.col      != null ? (p.col      as number) : undefined,
+        cv_edge:  p.cv_edge  != null ? (p.cv_edge  as number) : undefined,
+        row2:     p.row2     != null ? (p.row2     as number) : undefined,
+        col2:     p.col2     != null ? (p.col2     as number) : undefined,
+        cv_edge2: p.cv_edge2 != null ? (p.cv_edge2 as number) : undefined,
     }));
 
     // CV emits hexIndex as a list (interior vertices/edges are shared across

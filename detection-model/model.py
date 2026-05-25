@@ -67,9 +67,9 @@ CATAN_SPIRAL_POSITIONS = [
 
 KNOWN_RESOURCE_RANGES = {
     "brick": {
-        "B": (40, 60),
-        "G": (40, 70),
-        "R": (100, 125),
+        "H": (2, 10),
+        "S": (120, 160),
+        "V": (140, 170),
     },
 }
 
@@ -85,7 +85,7 @@ DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
 SLOW_FRAME_BUFFER_SIZE    = 10
-FAST_FRAME_BUFFER_SIZE    = 5
+FAST_FRAME_BUFFER_SIZE    = 2
 
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
 
@@ -161,13 +161,7 @@ def get_avg_content_color(img_bgr, mask):
     return tuple(map(int, np.mean(vib, axis=0).astype(int))) if vib.size > 0 else None
 
 def detect_resource_from_avg(avg_bgr):
-    b, g, r = avg_bgr
-    rng = KNOWN_RESOURCE_RANGES["brick"]
-    if (rng["B"][0] <= b <= rng["B"][1] and
-            rng["G"][0] <= g <= rng["G"][1] and
-            rng["R"][0] <= r <= rng["R"][1]):
-        return "brick"
-    return None
+    return predict_resource_from_avg(avg_bgr)
 
 # ── Port detection ────────────────────────────────────────────────────────────
 def detect_port_blobs(board_img, tile_results, R):
@@ -246,17 +240,31 @@ def detect_and_draw_ports(board_img, tile_results, R):
 
         resource = predict_resource_from_avg(avg)
 
+        avg_hsv = cv2.cvtColor(np.array([[avg]], dtype=np.uint8), cv2.COLOR_BGR2HSV)[0, 0]
+        h, s, v = int(avg_hsv[0]), int(avg_hsv[1]), int(avg_hsv[2])
+        label_text = f"H{h} S{s} V{v}" + (f" {resource[:2]}" if resource else "")
+
         color = PORT_COLORS["brick"]
         cv2.circle(out, (cx, cy), 22, color,    -1)
         cv2.circle(out, (cx, cy), 22, (0, 0, 0), 2)
-        (tw, th), _ = cv2.getTextSize(resource, FONT, 0.36, 1)
-        cv2.putText(out, f"{str(avg)} {resource[:2] if resource else ""}", (cx - tw//2, cy + th//2),
+        (tw, th), _ = cv2.getTextSize(label_text, FONT, 0.36, 1)
+        cv2.putText(out, label_text, (cx - tw//2, cy + th//2),
                     FONT, 0.36, (0,   0,   0), 2, cv2.LINE_AA)
-        cv2.putText(out, f"{str(avg)} {resource[:2] if resource else ""}", (cx - tw//2, cy + th//2),
+        cv2.putText(out, label_text, (cx - tw//2, cy + th//2),
                     FONT, 0.36, (255, 255, 255), 1, cv2.LINE_AA)
         
         if resource == "brick":
-            port_list.append({"cx": cx, "cy": cy, "label": "2:1 brick", "resource": "brick"})
+            entry: dict = {"cx": cx, "cy": cy, "label": "2:1 brick", "resource": "brick"}
+            if tile_results:
+                by_dist = sorted(tile_results, key=lambda t: np.hypot(cx - t[2], cy - t[3]))
+                for i, (t_row, t_col, tx_n, ty_n, _) in enumerate(by_dist[:2]):
+                    angle_deg = (np.degrees(np.arctan2(cy - ty_n, cx - tx_n)) + 360) % 360
+                    cv_edge   = int(round(angle_deg / 60) - 1) % 6
+                    suffix = "" if i == 0 else "2"
+                    entry[f"row{suffix}"]     = int(t_row)
+                    entry[f"col{suffix}"]     = int(t_col)
+                    entry[f"cv_edge{suffix}"] = int(cv_edge)
+            port_list.append(entry)
 
     return out, port_list
 
@@ -698,11 +706,12 @@ def make_portbg_only_mask(img_bgr):
         cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
 
 def predict_resource_from_avg(avg_bgr):
-    b, g, r = avg_bgr
+    hsv = cv2.cvtColor(np.array([[avg_bgr]], dtype=np.uint8), cv2.COLOR_BGR2HSV)[0, 0]
+    h, s, v = int(hsv[0]), int(hsv[1]), int(hsv[2])
     for res, rng in KNOWN_RESOURCE_RANGES.items():
-        if (rng["B"][0]<=b<=rng["B"][1] and
-                rng["G"][0]<=g<=rng["G"][1] and
-                rng["R"][0]<=r<=rng["R"][1]):
+        if (rng["H"][0] <= h <= rng["H"][1] and
+                rng["S"][0] <= s <= rng["S"][1] and
+                rng["V"][0] <= v <= rng["V"][1]):
             return res
     return None
 

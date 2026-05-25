@@ -102,6 +102,7 @@ const HARBOURS = [
 // ── Piece types ───────────────────────────────────────────────────────────────
 export type SettlementInfo = { q: number; r: number; v: number; color: number };
 export type RoadInfo       = { q: number; r: number; e: number; color: number };
+export type HarbourInfo    = { q: number; r: number; edge: number; type: string };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 type Props = {
@@ -112,10 +113,11 @@ type Props = {
   roads?: RoadInfo[];
   /** worldPos index of the tile the robber is on (0–18). null/undefined hides it. */
   robberWorldIndex?: number | null;
-  harbourScale?: number;
+  /** CV-detected harbour positions. Entries here replace the matching type in the default HARBOURS layout. */
+  harbourOverrides?: HarbourInfo[];
 };
 
-export default function CatanBoard3D({ className, tileTypes, settlements, roads, robberWorldIndex }: Props) {
+export default function CatanBoard3D({ className, tileTypes, settlements, roads, robberWorldIndex, harbourOverrides }: Props) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const updatePiecesRef = useRef<((s: SettlementInfo[], r: RoadInfo[], rob: number | null | undefined) => void) | null>(null);
   const requestRenderRef = useRef<(() => void) | null>(null);
@@ -317,7 +319,31 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
       });
 
       // ── Harbours ─────────────────────────────────────────────────────────────
-      HARBOURS.forEach(({ q, r, edge, type }) => {
+      // If CV detected the brick harbour at a different position than the default,
+      // the whole board is rotated. Find how many 60° CCW steps map the default
+      // brick position to the detected one, then rotate ALL harbours by that amount.
+      function rotateHex60CCW(q: number, r: number): [number, number] {
+        return [-r, q + r];
+      }
+      function applyRotation(q: number, r: number, edge: number, steps: number) {
+        let cq = q, cr = r, ce = edge;
+        const n = ((steps % 6) + 6) % 6;
+        for (let i = 0; i < n; i++) { [cq, cr] = rotateHex60CCW(cq, cr); ce = (ce + 1) % 6; }
+        return { q: cq, r: cr, edge: ce };
+      }
+      const defaultBrick   = HARBOURS.find(h => h.type === 'brick')!;
+      const brickCandidates = (harbourOverrides ?? []).filter(h => h.type === 'brick');
+      let rotSteps = 0;
+      outer: for (const candidate of brickCandidates) {
+        for (let n = 0; n < 6; n++) {
+          const t = applyRotation(defaultBrick.q, defaultBrick.r, defaultBrick.edge, n);
+          if (t.q === candidate.q && t.r === candidate.r && t.edge === candidate.edge) {
+            rotSteps = n; break outer;
+          }
+        }
+      }
+      const activeHarbours = HARBOURS.map(h => ({ ...applyRotation(h.q, h.r, h.edge, rotSteps), type: h.type }));
+      activeHarbours.forEach(({ q, r, edge, type }) => {
         const ctr = hexToWorld(q, r);
         const ep  = hexEdgeWorld(q, r, edge);
         const dx  = ep.x - ctr.x, dz = ep.z - ctr.z;
