@@ -90,7 +90,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-FRAME_BUFFER_SIZE    = 100
+FRAME_BUFFER_SIZE    = 1
 
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
 
@@ -1205,7 +1205,11 @@ async def cv_handler(websocket):
                 await websocket.send(processed)
                 if status == "ok":
                     valid_buffer.append(state)
+                    n = len(valid_buffer)
                     majority: dict = {
+                        "buffer_size": n,
+                        "valid_count": n,
+                        "is_stable":   n == FRAME_BUFFER_SIZE,
                         "tile_results":      [],
                         "port_results":      [],
                         "robber_tile_index": None,

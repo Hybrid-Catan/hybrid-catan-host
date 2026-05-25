@@ -62,11 +62,17 @@ export function parseBoardState(state: Record<string, unknown>): CVBoardState {
         resource: p.resource as string,
     }));
 
+    // CV emits hexIndex as a list (interior vertices/edges are shared across
+    // multiple hexes). Any hex in the list anchors the same world position, so
+    // we collapse to the first.
+    const firstHex = (h: unknown): number =>
+        Array.isArray(h) ? (h[0] as number) : (h as number);
+
     const vertex_colors: CVVertex[] = rawVertices.map((v, i) => ({
         id: (v.id as number) ?? i,
         cx: v.cx as number,
         cy: v.cy as number,
-        hexIndex: v.hexIndex as number,
+        hexIndex: firstHex(v.hexIndex),
         color: (v.color as string | null) ?? null,
     }));
 
@@ -74,7 +80,7 @@ export function parseBoardState(state: Record<string, unknown>): CVBoardState {
         cx: e.cx as number,
         cy: e.cy as number,
         angle: e.angle as number,
-        hexIndex: e.hexIndex as number,
+        hexIndex: firstHex(e.hexIndex),
         color: (e.color as string | null) ?? null,
         vertexA: (e.vertexA as number) ?? -1,
         vertexB: (e.vertexB as number) ?? -1,
