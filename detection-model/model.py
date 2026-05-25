@@ -67,10 +67,10 @@ CATAN_SPIRAL_POSITIONS = [
 
 KNOWN_RESOURCE_RANGES = {
     "brick": {
-        "B": (55, 82),
-        "G": (60, 92),
-        "R": (120, 175),
-    }
+        "B": (40, 60),
+        "G": (40, 70),
+        "R": (100, 125),
+    },
 }
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
@@ -244,20 +244,19 @@ def detect_and_draw_ports(board_img, tile_results, R):
         if avg is None:
             continue
 
-        resource = detect_resource_from_avg(avg)
-        if resource != "brick":
-            continue
+        resource = predict_resource_from_avg(avg)
 
         color = PORT_COLORS["brick"]
         cv2.circle(out, (cx, cy), 22, color,    -1)
         cv2.circle(out, (cx, cy), 22, (0, 0, 0), 2)
-        (tw, th), _ = cv2.getTextSize("BRICK", FONT, 0.36, 1)
-        cv2.putText(out, "BRICK", (cx - tw//2, cy + th//2),
+        (tw, th), _ = cv2.getTextSize(resource, FONT, 0.36, 1)
+        cv2.putText(out, f"{str(avg)} {resource[:2] if resource else ""}", (cx - tw//2, cy + th//2),
                     FONT, 0.36, (0,   0,   0), 2, cv2.LINE_AA)
-        cv2.putText(out, "BRICK", (cx - tw//2, cy + th//2),
+        cv2.putText(out, f"{str(avg)} {resource[:2] if resource else ""}", (cx - tw//2, cy + th//2),
                     FONT, 0.36, (255, 255, 255), 1, cv2.LINE_AA)
-
-        port_list.append({"cx": cx, "cy": cy, "label": "2:1 brick", "resource": "brick"})
+        
+        if resource == "brick":
+            port_list.append({"cx": cx, "cy": cy, "label": "2:1 brick", "resource": "brick"})
 
     return out, port_list
 
