@@ -139,31 +139,269 @@ export function getPlayerToHexMap(
     return result;
 }
 
-/** Which ports each player owns (settlement on a port vertex) */
+
+// ── Port layout ───────────────────────────────────────────────────────────────
+//
+// The standard Catan board has 9 ports spread across 30 perimeter vertices.
+// Each port occupies 2 consecutive vertices (the two corners of a coastal hex
+// face). Port[0] is anchored at the brick boat's inward vertex.
+//
+// OFFSETS: the 0-based index of each port's FIRST vertex in the clockwise
+// perimeter walk starting from the brick port vertex.
+// Fill in the real offsets once you've verified the walk order on a real board.
+//
+//   offset  resource
+//   ──────  ────────
+//   0       BRICK   ← anchor (the brick boat itself)
+//   3       WOOD
+//   6       WOOL
+//   9       ANY
+//   12      ORE
+//   15      ANY
+//   18      WHEAT
+//   21      ANY
+//   24      ANY
+//
+// Each entry covers that offset AND offset+1 (both vertices of the port face).
+const PORT_LAYOUT: Array<{ offset: number; resource: string }> = [
+    { offset: 3,  resource: "WOOD"  },
+    { offset: 6,  resource: "ANY"  },
+    { offset: 9,  resource: "WHEAT"   },
+    { offset: 13, resource: "ORE"   },
+    { offset: 16, resource: "ANY"   },
+    { offset: 19, resource: "WOOL" },
+    { offset: 23, resource: "ANY"   },
+    { offset: 26, resource: "ANY"   },
+    { offset: 29, resource: "BRICK"   },
+];
+
+// ── Graph helpers (mirrors computeLongestRoad pattern) ────────────────────────
+
+/** Vertex-id → list of neighbouring vertex-ids, built from CVEdge data. */
+function buildVertexAdjacency(edges: CVEdge[]): Map<number, number[]> {
+    const adj = new Map<number, number[]>();
+    for (const e of edges) {
+        const { vertexA, vertexB } = e;
+        if (vertexA < 0 || vertexB < 0 || vertexA === vertexB) continue;
+        if (!adj.has(vertexA)) adj.set(vertexA, []);
+        if (!adj.has(vertexB)) adj.set(vertexB, []);
+        adj.get(vertexA)!.push(vertexB);
+        adj.get(vertexB)!.push(vertexA);
+    }
+    // Deduplicate neighbours (the CV pipeline can emit duplicate edges)
+    for (const [v, ns] of adj) adj.set(v, [...new Set(ns)]);
+    return adj;
+}
+
+/**
+ * Returns the set of perimeter vertex IDs.
+ * Inner vertices connect to 6 neighbours on a standard hex grid;
+ * edge vertices have 3, and corner vertices have 2.
+ * Anything with ≤ 3 neighbours is on the perimeter.
+ */
+function findPerimeterVertices(adj: Map<number, number[]>): Set<number> {
+    const perimeter = new Set<number>();
+    for (const [v, ns] of adj) {
+        if (ns.length <= 3) perimeter.add(v);
+    }
+    return perimeter;
+}
+
+/**
+ * Walk the perimeter clockwise starting from `startId`, returning the ordered
+ * list of perimeter vertex IDs (length 30 for a standard board).
+ *
+ * Strategy: at each step, among the current vertex's perimeter neighbours,
+ * pick the one that keeps us turning clockwise. "Clockwise" relative to the
+ * board centre is determined by the sign of the cross product
+ *   (prev→cur) × (cur→next)
+ * being negative (right turn) in a y-down image coordinate system.
+ */
+function walkPerimeterClockwise(
+    startId: number,
+    adj: Map<number, number[]>,
+    perimeter: Set<number>,
+    vertexById: Map<number, CVVertex>,
+    centerX: number,
+    centerY: number,
+): number[] {
+    const order: number[] = [startId];
+    const visited = new Set<number>([startId]);
+
+    // For the very first step we have no "previous" vertex, so we pick the
+    // perimeter neighbour that is most clockwise relative to the board centre.
+    const firstNeighbours = (adj.get(startId) ?? []).filter(n => perimeter.has(n));
+    if (firstNeighbours.length === 0) return order;
+
+    // Angle of start vertex relative to centre
+    const sv = vertexById.get(startId)!;
+    const startAngle = Math.atan2(sv.cy - centerY, sv.cx - centerX);
+
+    // Pick the neighbour whose angle is just clockwise (slightly greater, mod 2π)
+    let prev = startId;
+    let cur = firstNeighbours.reduce((best, n) => {
+        const nv = vertexById.get(n)!;
+        const bv = vertexById.get(best)!;
+        const aN = (Math.atan2(nv.cy - centerY, nv.cx - centerX) - startAngle + 2 * Math.PI) % (2 * Math.PI);
+        const aB = (Math.atan2(bv.cy - centerY, bv.cx - centerX) - startAngle + 2 * Math.PI) % (2 * Math.PI);
+        // We want the smallest positive angular step clockwise
+        return aN < aB ? n : best;
+    });
+    order.push(cur);
+    visited.add(cur);
+
+    // Continue around the ring: at each step, among unvisited perimeter
+    // neighbours, choose the one making the most clockwise turn.
+    while (order.length < 30) {
+        const pv = vertexById.get(prev)!;
+        const cv = vertexById.get(cur)!;
+        const dx = cv.cx - pv.cx;
+        const dy = cv.cy - pv.cy;
+
+        const candidates = (adj.get(cur) ?? []).filter(
+            n => perimeter.has(n) && !visited.has(n)
+        );
+        if (candidates.length === 0) break;
+
+        // Pick the candidate that produces the most clockwise turn.
+        // Cross product (prev→cur) × (cur→next) < 0 means right turn (CW, y-down).
+        // Among multiple candidates, maximise that rightward-ness.
+        const next = candidates.reduce((best, n) => {
+            const nv = vertexById.get(n)!;
+            const bv = vertexById.get(best)!;
+            const crossN = dx * (nv.cy - cv.cy) - dy * (nv.cx - cv.cx);
+            const crossB = dx * (bv.cy - cv.cy) - dy * (bv.cx - cv.cx);
+            // More negative cross = more clockwise in y-down coords
+            return crossN < crossB ? n : best;
+        });
+
+        order.push(next);
+        visited.add(next);
+        prev = cur;
+        cur = next;
+    }
+
+    return order;
+}
+
+/**
+ * Infers port ownership from a single reliable brick-boat detection.
+ *
+ * Replaces the geometry-probe approach in `getPlayerToPortMap`. Instead of
+ * checking each vertex against every port blob, we:
+ *   1. Build the vertex adjacency graph from edge_colors.
+ *   2. Identify the 30 perimeter vertices (degree ≤ 3).
+ *   3. Anchor on the brick port: find the perimeter vertex closest to board
+ *      centre among those near the detected brick boat.
+ *   4. Walk clockwise to produce an ordered list of 30 perimeter vertices.
+ *   5. Project PORT_LAYOUT offsets onto that list to get per-port vertex pairs.
+ *   6. For each port, check whether any player has a settlement on either vertex.
+ *
+ * @param brickBoatCx   Pixel x of the detected brick boat centre.
+ * @param brickBoatCy   Pixel y of the detected brick boat centre.
+ * @param state         CV board state (vertex_colors + edge_colors required).
+ * @param gameState     Current game state for player lookup.
+ */
 export function getPlayerToPortMap(
+    brickBoatCx: number,
+    brickBoatCy: number,
     state: CVBoardState,
-    gameState: GameState
+    gameState: GameState,
 ): Record<string, CVPort[]> {
     const result: Record<string, CVPort[]> = {};
 
+    // ── 1. Build graph ────────────────────────────────────────────────────────
+    const adj = buildVertexAdjacency(state.edge_colors);
+    const perimeter = findPerimeterVertices(adj);
+
+    const vertexById = new Map<number, CVVertex>(
+        state.vertex_colors.map(v => [v.id, v])
+    );
+
+    // ── 2. Board centre (average of all vertex positions) ────────────────────
+    const allV = state.vertex_colors;
+    const centerX = allV.reduce((s, v) => s + v.cx, 0) / allV.length;
+    const centerY = allV.reduce((s, v) => s + v.cy, 0) / allV.length;
+
+    // ── 3. Anchor: perimeter vertex nearest to brick boat AND nearest to centre
+    //      Among all perimeter vertices within BOAT_RADIUS px of the boat,
+    //      pick the one closest to the board centre (the "inward" one).
+    const BOAT_RADIUS = 80; // px — tune if needed
+    const boatCandidates = [...perimeter]
+        .filter(id => {
+            const v = vertexById.get(id);
+            return v && Math.hypot(v.cx - brickBoatCx, v.cy - brickBoatCy) < BOAT_RADIUS;
+        })
+        .sort((a, b) => {
+            const va = vertexById.get(a)!;
+            const vb = vertexById.get(b)!;
+            return Math.hypot(va.cx - centerX, va.cy - centerY)
+                 - Math.hypot(vb.cx - centerX, vb.cy - centerY);
+        });
+
+    if (boatCandidates.length === 0) {
+        console.warn("[portDetection] No perimeter vertex found near brick boat — returning empty port map.");
+        return result;
+    }
+
+    const anchorId = boatCandidates[0]; // closest to centre → inward vertex
+
+    // ── 4. Walk perimeter clockwise from anchor ───────────────────────────────
+    const perimeterOrder = walkPerimeterClockwise(
+        anchorId, adj, perimeter, vertexById, centerX, centerY
+    );
+
+    if (perimeterOrder.length < 2) {
+        console.warn("[portDetection] Perimeter walk too short — check edge_colors data.");
+        return result;
+    }
+
+    // ── 5. Build synthetic CVPort objects from layout offsets ─────────────────
+    //      Each port covers two consecutive vertices (offset and offset+1).
+    const syntheticPorts: Array<{ port: CVPort; vertexIds: [number, number] }> = [];
+
+    for (const { offset, resource } of PORT_LAYOUT) {
+        const idA = perimeterOrder[offset % perimeterOrder.length];
+        const idB = perimeterOrder[(offset + 1) % perimeterOrder.length];
+        const vA  = vertexById.get(idA);
+        const vB  = vertexById.get(idB);
+        if (!vA || !vB) continue;
+
+        const port: CVPort = {
+            cx:       (vA.cx + vB.cx) / 2,
+            cy:       (vA.cy + vB.cy) / 2,
+            label:    resource === "ANY" ? "3:1" : `2:1 ${resource}`,
+            resource,
+        };
+        syntheticPorts.push({ port, vertexIds: [idA, idB] });
+    }
+
+    // ── 6. Match player settlements to port vertices ──────────────────────────
+    const portVertexSet = new Map<number, CVPort>(); // vertexId → port
+    for (const { port, vertexIds } of syntheticPorts) {
+        portVertexSet.set(vertexIds[0], port);
+        portVertexSet.set(vertexIds[1], port);
+    }
+
+    const visitedPortPlayer = new Set<string>(); // prevent duplicate entries
+
     for (const vertex of state.vertex_colors) {
         if (!vertex.color) continue;
+        const port = portVertexSet.get(vertex.id);
+        if (!port) continue;
+
         const playerColor = CV_TO_GAME_COLOR[vertex.color];
         const player = gameState.players.find(p => p.color === playerColor);
         if (!player) continue;
 
-        // Check if this vertex is near a port blob
-        const nearPort = state.port_results.find(
-            p => Math.hypot(p.cx - vertex.cx, p.cy - vertex.cy) < 60
-        );
-        if (!nearPort) continue;
+        const dedupKey = `${player.playerId}:${port.cx},${port.cy}`;
+        if (visitedPortPlayer.has(dedupKey)) continue;
+        visitedPortPlayer.add(dedupKey);
 
-        const id = player.playerId;
-        if (!result[id]) result[id] = [];
-        if (!result[id].find(p => p.cx === nearPort.cx)) {
-            result[id].push(nearPort);
-        }
+        if (!result[player.playerId]) result[player.playerId] = [];
+        result[player.playerId].push(port);
     }
+
     return result;
 }
 
