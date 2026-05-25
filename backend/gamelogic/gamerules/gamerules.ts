@@ -616,6 +616,16 @@ export function validateBoardPlacements(gameState: GameState): BoardWarning[] {
         }
     }
 
+    // Initial robber placement — at the start of the game the robber must
+    // be on the desert tile.
+    const robber = getInitialRobberPlacement(gameState);
+    if (!robber.valid) {
+        warnings.push({
+            type: "ROBBER",
+            reason: robber.reason ?? "",
+        });
+    }
+
     // Roads — dedup by sorted endpoint pair so a single physical edge appears
     // once even if CV emits two entries for it.
     const seen = new Set<string>();
@@ -644,6 +654,55 @@ export function validateBoardPlacements(gameState: GameState): BoardWarning[] {
     }
 
     return warnings;
+}
+
+/**
+ * During setup, the robber must be on the desert tile. Returns a RuleResult
+ * driven by the CV-detected robber position (`cvBoardState.robber_tile_index`),
+ * not the in-memory `gameState.robber` (which the host seeds from the desert
+ * lookup and would mask a misplaced physical pawn).
+ *
+ * Returns valid outside setup, before CV has classified the desert, and before
+ * CV has located the physical robber pawn — we only complain once we have the
+ * data needed to be sure.
+ */
+export function getInitialRobberPlacement(gameState: GameState): RuleResult {
+    if (gameState.phase !== "SETUP_1" && gameState.phase !== "SETUP_2") {
+        return { valid: true };
+    }
+    const cv = gameState.cvBoardState;
+    if (!cv || !cv.tile_results || cv.tile_results.length === 0) {
+        return { valid: true };
+    }
+
+    let desert: number | null = null;
+    for (const t of cv.tile_results) {
+        if (t.resource === "Desert" && typeof t.spiralIndex === "number") {
+            desert = t.spiralIndex;
+            break;
+        }
+    }
+    if (desert === null) {
+        return {
+            valid: false,
+            reason: "The camera can't identify the desert tile. Make sure the whole board is in frame and the lighting is good, then place the robber pawn on the desert.",
+        };
+    }
+
+    const physical = cv.robber_tile_index;
+    if (physical == null || physical < 0) {
+        return {
+            valid: false,
+            reason: "Place the robber pawn on the desert tile before starting the game. The camera can't see the robber yet.",
+        };
+    }
+    if (physical !== desert) {
+        return {
+            valid: false,
+            reason: "The robber must start on the desert tile. Move the robber pawn onto the desert before continuing.",
+        };
+    }
+    return { valid: true };
 }
 
 /**
@@ -686,6 +745,8 @@ export function canConfirmSetupSettlement(gameState: GameState): RuleResult {
     if (!gameState.cvBoardState) {
         return { valid: false, reason: "The board hasn't been detected yet. Make sure the camera can see your piece." };
     }
+    const robber = getInitialRobberPlacement(gameState);
+    if (!robber.valid) return robber;
     const { settlements } = countPlayerPiecesFromCV(gameState, player);
     const expected = gameState.phase === "SETUP_1" ? 1 : 2;
     const roundLabel = gameState.phase === "SETUP_1" ? "first" : "second";
@@ -719,6 +780,8 @@ export function canConfirmSetup(gameState: GameState): RuleResult {
     if (!gameState.cvBoardState) {
         return { valid: false, reason: "The board hasn't been detected yet. Make sure the camera can see your piece." };
     }
+    const robber = getInitialRobberPlacement(gameState);
+    if (!robber.valid) return robber;
 
     const { settlements, roads } = countPlayerPiecesFromCV(gameState, player);
     const expectedSettlements = gameState.phase === "SETUP_1" ? 1 : 2;

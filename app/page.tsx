@@ -157,6 +157,16 @@ function spiralToQR(spiralIndex: number): [number, number] | null {
   return [col - Math.min(row, 2), row - 2];
 }
 
+function spiralToWorldIndex(spiralIndex: number): number | null {
+  const pos = CATAN_SPIRAL_POSITIONS[spiralIndex];
+  if (!pos) return null;
+  const [row, col] = pos;
+  const rowMap = WORLD_POS_FROM_ROW_COL[row];
+  if (!rowMap) return null;
+  const idx = rowMap[col];
+  return typeof idx === 'number' ? idx : null;
+}
+
 // Convert stable CVBoardState tile layout to TileType[] in worldPos order
 function cvStateToTileTypes(state: CVBoardState): TileType[] {
   const layout: TileType[] = new Array(19).fill('ore');
@@ -274,6 +284,7 @@ export default function Host() {
   const [boardTileTypes,  setBoardTileTypes]  = useState<TileType[] | undefined>(undefined);
   const [boardSettlements, setBoardSettlements] = useState<SettlementInfo[] | undefined>(undefined);
   const [boardRoads,       setBoardRoads]       = useState<RoadInfo[] | undefined>(undefined);
+  const [boardRobberWorldIndex, setBoardRobberWorldIndex] = useState<number | null>(null);
 
   function addLog(msg: string, type: LogEntry["type"] = "info") {
     setLogs(l => [{ ts: now(), msg, type }, ...l].slice(0, 80));
@@ -425,17 +436,15 @@ export default function Host() {
                 cvBoardState: bs,
               }),
             });
-            addLog(bs.edge_colors?.map(e => e?.color?.toString()).toString() ?? "null", "warn")
             logCvState(state);
             setCvStatus("processing");
 
-            if (state.majority) {
-              const maj        = state.majority;
-              const stableBoard = parseBoardState(maj);
+            {
+              const stableBoard = bs;
               setStableState(stableBoard);
-              setBufferInfo({ size: maj.buffer_size ?? 0, validCount: maj.valid_count ?? 0, stable: maj.is_stable ?? false });
+              setBufferInfo({ size: state.buffer_size ?? 0, validCount: state.valid_count ?? 0, stable: state.is_stable ?? false });
 
-              if (maj.is_stable && stableBoard.tile_results.length > 0) {
+              if (state.is_stable && stableBoard.tile_results.length > 0) {
                 if (!tilesLockedRef.current) {
                   // Lock tile layout on first stable frame — never update again
                   tilesLockedRef.current = true;
@@ -445,6 +454,11 @@ export default function Host() {
                 const { settlements: newS, roads: newR } = cvStateToPieces(stableBoard);
                 setBoardSettlements(prev => JSON.stringify(prev) === JSON.stringify(newS) ? prev : newS);
                 setBoardRoads(prev => JSON.stringify(prev) === JSON.stringify(newR) ? prev : newR);
+                const robberSpiral = stableBoard.robber_tile_index;
+                const robberWorld = typeof robberSpiral === 'number' && robberSpiral >= 0
+                  ? spiralToWorldIndex(robberSpiral)
+                  : null;
+                setBoardRobberWorldIndex(prev => prev === robberWorld ? prev : robberWorld);
               }
             }
           }
@@ -855,6 +869,7 @@ export default function Host() {
               tileTypes={boardTileTypes}
               settlements={boardSettlements}
               roads={boardRoads}
+              robberWorldIndex={boardRobberWorldIndex}
             />
 
             {/* Canvas: live CV feed before stable, stays in DOM for WebRTC after */}

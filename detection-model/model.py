@@ -442,7 +442,7 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
             if (lo[0] <= dom_h <= hi[0] and
                     lo[1] <= dom_s <= hi[1] and
                     lo[2] <= dom_v <= hi[2]):
-                return f"{name[:2]}"
+                return name
         return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
 
     tile_results = []
@@ -1036,21 +1036,18 @@ async def cv_handler(websocket):
                 if status == "ok":
                     valid_buffer.append(state)
                     n = len(valid_buffer)
-                    full = (n == FRAME_BUFFER_SIZE)
                     majority: dict = {
                         "buffer_size": n,
                         "valid_count": n,
-                        "is_stable":   full,
+                        "is_stable":   n == FRAME_BUFFER_SIZE,
                         "tile_results":      [],
                         "port_results":      [],
                         "robber_tile_index": None,
                         "vertex_colors":     [],
                         "edge_colors":       [],
                     }
-                    if full:
-                        majority.update(compute_majority_state(list(valid_buffer)))
-                    payload = dict(state)
-                    payload["majority"] = majority
+                    majority.update(compute_majority_state(list(valid_buffer)))
+                    payload = majority
                     await websocket.send(json.dumps(payload).encode())
                 else:
                     await websocket.send(json.dumps({"error": status}).encode())
