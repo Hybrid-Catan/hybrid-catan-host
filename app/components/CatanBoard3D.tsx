@@ -1,6 +1,10 @@
 'use client';
 import { useEffect, useRef } from 'react';
 
+// Module-level GLTF promise cache — survives React remounts so models are
+// only fetched and parsed once per browser session.
+const _gltfCache = new Map<string, Promise<any>>();
+
 // ── Hex math (render/src/hex.js) ──────────────────────────────────────────────
 const R            = 1;
 const GRID_RADIUS  = 2;
@@ -138,9 +142,11 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
       const W = container.clientWidth  || 800;
       const H = container.clientHeight || 600;
 
-      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'low-power' });
+      THREE.Cache.enabled = true;
+
+      const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'low-power' });
       renderer.setSize(W, H);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping      = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.0;
@@ -198,6 +204,32 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
       await MeshoptDecoder.ready;
       gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 
+      // Load a GLTF once; return the cached promise on subsequent calls.
+      function loadGltf(url: string): Promise<any> {
+        if (!_gltfCache.has(url)) {
+          _gltfCache.set(url, new Promise((res, rej) => gltfLoader.load(url, res, undefined, rej)));
+        }
+        return _gltfCache.get(url)!;
+      }
+
+      // Dispose all GPU resources owned by an object subtree.
+      function disposeMeshes(obj: any) {
+        obj.traverse((child: any) => {
+          child.geometry?.dispose();
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          mats.forEach((m: any) => m?.dispose());
+        });
+      }
+
+      // Shared piece geometries — allocated once, reused across all updatePieces calls.
+      const sharedGeo = {
+        body:       new THREE.BoxGeometry(0.3, 0.3, 0.3),
+        roof:       new THREE.ConeGeometry(0.25, 0.25, 4),
+        road:       new THREE.BoxGeometry(0.15, 0.15, R),
+        robberBase: new THREE.CylinderGeometry(0.18, 0.22, 0.15, 16),
+        robberHead: new THREE.SphereGeometry(0.16, 16, 12),
+      };
+
       function addObject({ type, position, color = null, scale = 1, url = '', rotation = 0 }: {
         type: string;
         position: { x: number; y?: number; z: number };
@@ -211,9 +243,9 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
           wrapper.position.set(position.x, position.y ?? 0, position.z);
           wrapper.rotation.y = rotation;
           scene.add(wrapper);
-          gltfLoader.load(url, (gltf: any) => {
+          loadGltf(url).then((gltf: any) => {
             if (disposed) return;
-            const model = gltf.scene;
+            const model = gltf.scene.clone(true);
             if (color !== null) {
               // GLTF tiles ship with PBR baseColorFactor ≈ [0.85,0.85,0.85] (grey).
               // Setting material.color alone gets crushed by the factor + tone
@@ -309,13 +341,17 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
         newRoads: RoadInfo[],
         newRobberWorldIndex: number | null | undefined,
       ) {
-        while (piecesGroup.children.length > 0) piecesGroup.remove(piecesGroup.children[0]);
+        while (piecesGroup.children.length > 0) {
+          const child = piecesGroup.children[0];
+          piecesGroup.remove(child);
+          disposeMeshes(child);
+        }
 
         for (const { q: sQ, r: sR, v, color } of newSettlements) {
-          const pos = hexVertexWorld(sQ, sR, v);
+          const pos  = hexVertexWorld(sQ, sR, v);
           const mat  = new THREE.MeshStandardMaterial({ color });
-          const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mat);
-          const roof = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.25, 4), mat);
+          const body = new THREE.Mesh(sharedGeo.body, mat);
+          const roof = new THREE.Mesh(sharedGeo.roof, mat);
           body.position.y = 0.15;
           roof.position.y = 0.425;
           roof.rotation.y = Math.PI / 4;
@@ -328,10 +364,7 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
 
         for (const { q: rQ, r: rR, e, color } of newRoads) {
           const pos  = hexEdgeWorld(rQ, rR, e);
-          const mesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.15, 0.15, R),
-            new THREE.MeshStandardMaterial({ color }),
-          );
+          const mesh = new THREE.Mesh(sharedGeo.road, new THREE.MeshStandardMaterial({ color }));
           // Lift the road so it sits on top of the tile surface — at y=0 the
           // bottom half is below the base and gets clipped by tile geometry.
           mesh.position.set(pos.x, 0.12, pos.z);
@@ -346,8 +379,8 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
         ) {
           const rPos = worldPos[newRobberWorldIndex];
           const mat  = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4, metalness: 0.2 });
-          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.15, 16), mat);
-          const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), mat);
+          const base = new THREE.Mesh(sharedGeo.robberBase, mat);
+          const head = new THREE.Mesh(sharedGeo.robberHead, mat);
           base.position.y = 0.075;
           head.position.y = 0.28;
           const g = new THREE.Group();
@@ -398,6 +431,14 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
         controls.removeEventListener('change', requestRender);
         controls.dispose();
         dracoLoader.dispose();
+        // Dispose all scene GPU resources
+        scene.traverse((obj: any) => {
+          obj.geometry?.dispose();
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach((m: any) => m?.dispose());
+        });
+        // Dispose shared piece geometries
+        Object.values(sharedGeo).forEach(g => g.dispose());
         renderer.dispose();
         if (renderer.domElement.parentNode === container) container.removeChild(renderer.domElement);
       };

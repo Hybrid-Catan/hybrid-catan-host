@@ -3,7 +3,6 @@ import numpy as np
 import os
 import asyncio
 import websockets
-import tensorflow as tf
 import json
 from dataclasses import dataclass, asdict
 from typing import Optional
@@ -27,12 +26,23 @@ PORT_COLOR_UPPER = np.array([235, 244, 250], dtype=np.uint8)
 PORT_NAMES_2to1 = ["brick", "ore", "sheep", "wheat", "wood"]
 
 RESOURCES_BGR = {
-    "Hill":     (np.array([20,  50, 115]), np.array([ 70,  90, 150])),
+    "Hills":    (np.array([20,  50, 115]), np.array([ 70,  90, 150])),
     "Forest":   (np.array([30,  65,  30]), np.array([ 80,  95,  80])),
     "Pasture":  (np.array([35, 130, 120]), np.array([ 90, 185, 165])),
     "Mountain": (np.array([60,  70,  85]), np.array([ 95, 110, 115])),
     "Desert":   (np.array([75, 150, 170]), np.array([125, 180, 240])),
     "Field":    (np.array([30,  90, 120]), np.array([ 75, 145, 205])),
+}
+
+# HSV ranges for tile classification (OpenCV convention: H 0-180, S 0-255, V 0-255).
+# Calibrate these against your camera — they are used in preference to RESOURCES_BGR.
+RESOURCES_HSV = {
+    "Hills":    (np.array([10, 120, 120]), np.array([14, 200, 200])),
+    "Forest":   (np.array([40, 110, 50]), np.array([54, 190, 100])),
+    "Pasture":  (np.array([30, 100, 150]), np.array([38, 170, 210])),
+    "Mountain": (np.array([16, 50, 90]), np.array([19, 90, 120])),
+    "Desert":   (np.array([20, 80, 190]), np.array([22, 120, 230])),
+    "Field":    (np.array([19, 140, 170]), np.array([22, 220, 220])),
 }
 RESOURCE_DRAW_COLORS = {
     "Pasture":  ( 80, 180,  80),
@@ -74,7 +84,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-SLOW_FRAME_BUFFER_SIZE    = 30
+SLOW_FRAME_BUFFER_SIZE    = 10
 FAST_FRAME_BUFFER_SIZE    = 5
 
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
@@ -261,29 +271,38 @@ def _boost(bgr):
     out = np.array([[[h, min(255., s * SAT_BOOST), min(255., v * VAL_BOOST)]]], dtype=np.uint8)
     return tuple(int(x) for x in cv2.cvtColor(out, cv2.COLOR_HSV2BGR)[0, 0])
 
-# ── TensorFlow utilities ──────────────────────────────────────────────────────
 def tf_classify_tile(avg_bgr_np):
-    avg_tf = tf.constant(avg_bgr_np, dtype=tf.float32)
-    for name, (lo, hi) in RESOURCES_BGR.items():
-        if tf.reduce_all((avg_tf >= tf.constant(lo, dtype=tf.float32)) &
-                         (avg_tf <= tf.constant(hi, dtype=tf.float32))):
+    px      = np.clip(avg_bgr_np, 0, 255).astype(np.uint8).reshape(1, 1, 3)
+    avg_hsv = cv2.cvtColor(px, cv2.COLOR_BGR2HSV)[0, 0].astype(np.float32)
+    for name, (lo, hi) in RESOURCES_HSV.items():
+        if np.all(avg_hsv >= lo) and np.all(avg_hsv <= hi):
+            print(f"[HSV] H={avg_hsv[0]:.0f} S={avg_hsv[1]:.0f} V={avg_hsv[2]:.0f} → {name}")
             return name
-    return "Desert"
+    # Nearest-neighbour fallback: pick closest resource by midpoint distance
+    best_name, best_dist = "Desert", float('inf')
+    for name, (lo, hi) in RESOURCES_HSV.items():
+        mid  = (lo.astype(np.float32) + hi.astype(np.float32)) / 2
+        dist = float(np.linalg.norm(avg_hsv - mid))
+        if dist < best_dist:
+            best_dist = dist
+            best_name = name
+    print(f"[HSV] H={avg_hsv[0]:.0f} S={avg_hsv[1]:.0f} V={avg_hsv[2]:.0f} → {best_name} (nearest-neighbour)")
+    return best_name
 
 def tf_hist_correlation(crop_hsv, tmpl_hsv, crop_mask, tmpl_mask):
     h_bins, s_bins = 50, 60
     def make_hist(hsv_img, mask):
-        m      = tf.cast(mask, tf.bool)
-        h_vals = tf.boolean_mask(tf.cast(hsv_img[:,:,0], tf.float32), m)
-        s_vals = tf.boolean_mask(tf.cast(hsv_img[:,:,1], tf.float32), m)
-        h_idx  = tf.clip_by_value(tf.cast(h_vals / 180.0 * h_bins, tf.int32), 0, h_bins-1)
-        s_idx  = tf.clip_by_value(tf.cast(s_vals / 256.0 * s_bins, tf.int32), 0, s_bins-1)
+        m      = mask.astype(bool)
+        h_vals = hsv_img[:, :, 0][m].astype(np.float32)
+        s_vals = hsv_img[:, :, 1][m].astype(np.float32)
+        h_idx  = np.clip((h_vals / 180.0 * h_bins).astype(np.int32), 0, h_bins - 1)
+        s_idx  = np.clip((s_vals / 256.0 * s_bins).astype(np.int32), 0, s_bins - 1)
         flat   = h_idx * s_bins + s_idx
-        hist   = tf.cast(tf.math.bincount(flat, minlength=h_bins*s_bins,
-                                           maxlength=h_bins*s_bins), tf.float32)
-        return hist / (tf.norm(hist) + 1e-8)
-    corr = tf.reduce_sum(make_hist(crop_hsv, crop_mask) * make_hist(tmpl_hsv, tmpl_mask))
-    return float(tf.maximum(corr, 0.0).numpy())
+        hist   = np.bincount(flat, minlength=h_bins * s_bins).astype(np.float32)
+        norm   = np.linalg.norm(hist)
+        return hist / (norm + 1e-8)
+    corr = float(np.dot(make_hist(crop_hsv, crop_mask), make_hist(tmpl_hsv, tmpl_mask)))
+    return max(corr, 0.0)
 
 # ── Hexagon detection ─────────────────────────────────────────────────────────
 def deduplicate_lines(lines, angle_thresh_deg=5, dist_thresh=15):
@@ -438,14 +457,15 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
         pixels_bgr, _ = get_pixels(tx, ty)
         if len(pixels_bgr) == 0:
             return "Unknown"
-        avg = pixels_bgr.mean(axis=0)
-        dom_h, dom_s, dom_v = float(avg[0]), float(avg[1]), float(avg[2])
-        for name, (lo, hi) in RESOURCES_BGR.items():
-            if (lo[0] <= dom_h <= hi[0] and
-                    lo[1] <= dom_s <= hi[1] and
-                    lo[2] <= dom_v <= hi[2]):
+        avg_bgr = pixels_bgr.mean(axis=0).astype(np.uint8)
+        px      = avg_bgr.reshape(1, 1, 3)
+        h, s, v = cv2.cvtColor(px, cv2.COLOR_BGR2HSV)[0, 0].astype(float)
+        for name, (lo, hi) in RESOURCES_HSV.items():
+            if (lo[0] <= h <= hi[0] and
+                    lo[1] <= s <= hi[1] and
+                    lo[2] <= v <= hi[2]):
                 return name
-        return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
+        return f"H{h:.0f} S{s:.0f} V{v:.0f}"
 
     tile_results = []
     for row_idx, num_tiles in enumerate(tile_layout):
@@ -806,7 +826,7 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
             cv2.putText(overlay, "ROBBER", (tx-tw//2, ty+th//2),
                         FONT, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
 
-        final_board2         = place_numbers(overlay, tile_results, R)
+        final_board2         = overlay
         result, port_results = detect_and_draw_ports(final_board2.copy(), tile_results, R)
 
         spiral_lookup = {pos: i for i, pos in enumerate(CATAN_SPIRAL_POSITIONS)}
