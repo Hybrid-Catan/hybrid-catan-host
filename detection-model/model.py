@@ -22,8 +22,8 @@ LOWER_TEAL = np.array([ 92,  120, 80])
 UPPER_TEAL = np.array([200, 255, 255])
 
 
-PORT_COLOR_LOWER = np.array([196, 231, 243], dtype=np.uint8)
-PORT_COLOR_UPPER = np.array([255, 255, 255], dtype=np.uint8)
+PORT_COLOR_LOWER = np.array([97, 156, 187], dtype=np.uint8)
+PORT_COLOR_UPPER = np.array([235, 244, 250], dtype=np.uint8)
 
 PORT_NAMES_2to1 = ["brick", "ore", "sheep", "wheat", "wood"]
 PORT_COLORS = {
@@ -36,12 +36,12 @@ PORT_COLORS = {
 }
 
 RESOURCES_BGR = {
-    "Hill": (np.array([20, 50, 113]), np.array([70, 95, 150])),       #
-    "Forest": (np.array([30, 65, 30]), np.array([60, 95, 60])),  #
-    "Pasture": (np.array([35, 145, 120]), np.array([75, 185, 165])), #
-    "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),#
-    "Desert": (np.array([75, 150, 170]), np.array([115, 180, 240])), #
-    "Field": (np.array([30, 105, 140]), np.array([75, 145, 205])), 
+    "Hill": (np.array([20, 50, 115]), np.array([70, 90, 150])),
+    "Forest": (np.array([30, 65, 30]), np.array([80, 95, 80])),
+    "Pasture": (np.array([35, 130, 120]), np.array([90, 185, 165])),
+    "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),
+    "Desert": (np.array([75, 150, 170]), np.array([125, 180, 240])),
+    "Field": (np.array([30, 90, 120]), np.array([75, 145, 205])),
 }
 RESOURCE_DRAW_COLORS = {
     "Pasture":  ( 80, 180,  80),
@@ -90,9 +90,8 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-FRAME_BUFFER_SIZE    = 100    # frames kept for majority-vote stable state
+FRAME_BUFFER_SIZE    = 100
 
-# FIX 3: SAT_BOOST / VAL_BOOST moved to module level so _boost() can use them
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
 
 PLAYER_DRAW_COLORS = {
@@ -106,6 +105,10 @@ LABEL_TEXT = {"orange": "ORG", "red": "RED", "blue": "BLU", "white": "WHT"}
 COLOR_TOLERANCE    = 15
 EXCLUDE_SAND_BGR   = np.array([170, 215, 230], dtype=np.float32)
 SAND_EXCLUSION_THR = 35
+
+# ── Port blob save directory ──────────────────────────────────────────────────
+# Change this path to wherever you want the crops written.
+PORT_BLOB_SAVE_DIR = "port_blobs"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def hex_to_bgr(h):
@@ -127,6 +130,7 @@ COLOR_RANGES = [
     ("rect",     "white",  *_range("#ffffff", "#faffec")),
     ("triangle", "white",  *_range("#afb6ad", "#ffffff")),
 ]
+
 def build_hex_exclusion_mask(shape, tile_results, R):
     mask = np.zeros(shape[:2], dtype=np.uint8)
     for _, _, tx, ty, _ in tile_results:
@@ -137,15 +141,15 @@ def build_hex_exclusion_mask(shape, tile_results, R):
         ], dtype=np.int32)
         cv2.fillPoly(mask, [pts], 255)
     return mask
- 
- 
+
+
 def remove_white_and_dark(img_bgr, dark_thresh=40, bright_thresh=230):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     r = img_bgr.copy()
     r[(gray < dark_thresh) | (gray > bright_thresh)] = (255, 255, 255)
     return r
- 
- 
+
+
 def make_content_mask(img_bgr, dark_thresh=50, bright_thresh=220, sat_thresh=60):
     _, s, v = cv2.split(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV))
     excl = cv2.bitwise_or(
@@ -155,8 +159,8 @@ def make_content_mask(img_bgr, dark_thresh=50, bright_thresh=220, sat_thresh=60)
     excl = cv2.bitwise_or(excl, (v > bright_thresh).astype(np.uint8) * 255)
     excl = cv2.bitwise_or(excl, (s < sat_thresh).astype(np.uint8) * 255)
     return cv2.morphologyEx(cv2.bitwise_not(excl), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
- 
- 
+
+
 def get_avg_content_color(img_bgr, mask):
     pixels = img_bgr[mask == 255]
     if pixels.size == 0:
@@ -165,19 +169,19 @@ def get_avg_content_color(img_bgr, mask):
     s_vals = hsv_p[:, 1]
     vib = pixels[s_vals >= np.percentile(s_vals, 50)]
     return tuple(map(int, np.mean(vib, axis=0).astype(int))) if vib.size > 0 else None
- 
-# ── Core detection priority: brick < wood < wheat ─────────────────────────────
+
+
 def detect_resource_from_avg(avg_bgr):
     """Check brick first, then wood, then wheat. Return first match or None."""
     b, g, r = avg_bgr
-    for res in ("brick", "wood", "wheat"):          # priority order
+    for res in ("brick", "wood", "wheat"):
         rng = KNOWN_RESOURCE_RANGES[res]
         if (rng["B"][0] <= b <= rng["B"][1] and
                 rng["G"][0] <= g <= rng["G"][1] and
                 rng["R"][0] <= r <= rng["R"][1]):
             return res
     return None
- 
+
 
 def detect_port_blobs(board_img, tile_results, R):
     """Find light-coloured port tiles outside the hex board area."""
@@ -194,6 +198,17 @@ def detect_port_blobs(board_img, tile_results, R):
         build_hex_exclusion_mask((H, W), tile_results, R),
         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)), iterations=2
     )
+
+    # ── Build teal/water neighbourhood mask ──────────────────────────────
+    hsv = cv2.cvtColor(board_img, cv2.COLOR_BGR2HSV)
+    teal_mask = cv2.inRange(hsv, LOWER_TEAL, UPPER_TEAL)
+    # Dilate teal generously so blobs touching/near the teal border pass
+    teal_dilated = cv2.dilate(
+        teal_mask,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)),
+        iterations=3
+    )
+
     cnts, _ = cv2.findContours(
         cv2.bitwise_and(mask, cv2.bitwise_not(hex_e)),
         cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
@@ -202,8 +217,19 @@ def detect_port_blobs(board_img, tile_results, R):
     for cnt in cnts:
         if cv2.contourArea(cnt) < 300:
             continue
+
         x, y, w, h = cv2.boundingRect(cnt)
         cx, cy = x + w // 2, y + h // 2
+
+        # ── Teal-neighbour check ──────────────────────────────────────────
+        # At least 15% of the pixels in a ring around the blob must be teal
+        ring_mask = np.zeros((H, W), dtype=np.uint8)
+        cv2.drawContours(ring_mask, [cnt], -1, 255, thickness=int(R * 0.4))
+        ring_pixels = cv2.countNonZero(ring_mask)
+        teal_overlap = cv2.countNonZero(cv2.bitwise_and(ring_mask, teal_dilated))
+        if ring_pixels > 0 and (teal_overlap / ring_pixels) < 0.95:
+            continue  # blob is not surrounded by teal/water — skip it
+
         bf = np.zeros((H, W), dtype=np.uint8)
         cv2.drawContours(bf, [cnt], -1, 255, -1)
         roi = board_img[y:y + h, x:x + w].copy()
@@ -211,8 +237,6 @@ def detect_port_blobs(board_img, tile_results, R):
         blobs.append((cx, cy, roi))
     return blobs
 
-# FIX 3: _boost() extracted to module level so both draw_vertices_edges
-#         and the board-state builder inside process_frame can call it.
 def _boost(bgr):
     c = np.array(bgr, dtype=np.float32)
     if np.linalg.norm(c - DESERT_BGR) < DESERT_THRESHOLD:
@@ -290,14 +314,10 @@ def detect_board_hexagon(img, hsv, h_img, w_img):
                              cv2.MORPH_CLOSE,
                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5)),
                              iterations=1)
-    # Drop small connected components — floating teal/blue pieces on the table
-    # near the board inject spurious lines that wreck the hull. Use a size
-    # floor (not just "keep largest") because the board outline often breaks
-    # into several big arcs that all need to be kept.
     n_cc, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if n_cc > 1:
         keep = stats[:, cv2.CC_STAT_AREA] >= 500
-        keep[0] = False  # background
+        keep[0] = False
         mask = np.isin(labels, np.where(keep)[0]).astype(np.uint8) * 255
     dedup = deduplicate_lines(cv2.HoughLinesP(cv2.Canny(mask, 80, 160, apertureSize=3),
                                               1, np.pi/180, 60,
@@ -331,9 +351,6 @@ def detect_board_hexagon(img, hsv, h_img, w_img):
         for _, pt in hits: vertices.append(pt)
 
     def _greedy_furthest_six(pts):
-        """Pick 6 hex corners from a candidate hull using greedy furthest-from-
-        centroid with a 25° angular separation guard. Returns None if 6 corners
-        can't be picked."""
         centroid = pts.mean(axis=0)
         deltas = pts - centroid
         angs = np.arctan2(deltas[:, 1], deltas[:, 0])
@@ -352,9 +369,6 @@ def detect_board_hexagon(img, hsv, h_img, w_img):
                 if len(picked) == 6: break
         return pts[picked] if len(picked) == 6 else None
 
-    # Primary path: pick 6 corners from line-intersection candidates. Line
-    # intersections triangulate to true corner positions much more accurately
-    # than raw contour points.
     if len(vertices) >= 6:
         pts_arr  = np.array(vertices, dtype=np.float32)
         hull_idx = cv2.convexHull(pts_arr.reshape(-1,1,2), returnPoints=False)
@@ -363,9 +377,6 @@ def detect_board_hexagon(img, hsv, h_img, w_img):
         if picked is not None and len(picked) == 6:
             return picked.reshape(6,1,2).astype(np.int32)
 
-    # Fallback: when the outline is broken on one side, line intersections miss
-    # that corner entirely. Use the mask's outer contour hull instead — every
-    # visible corner is in there even if Hough never linked them.
     contour_cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contour_cnts: return None
     combined = np.vstack(contour_cnts)
@@ -385,25 +396,18 @@ def hex_mask_fn(cx, cy, r, shape):
     return mask
 
 def enhance_tile_contrast(img_bgr: np.ndarray) -> np.ndarray:
-    # ── 1. CLAHE on each BGR channel independently ────────────────────────
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
     b, g, r = cv2.split(img_bgr)
     img_eq = cv2.merge([clahe.apply(b), clahe.apply(g), clahe.apply(r)])
-
-    # ── 2. Per-channel contrast stretch ──────────────────────────────────
     img_float = img_eq.astype(np.float32)
     b, g, r   = cv2.split(img_float)
     b = np.clip(b * 1.1, 0, 255)
     g = np.clip(g * 1.2, 0, 255)
     r = np.clip(r * 1.15, 0, 255)
     img_boosted = cv2.merge([b, g, r]).astype(np.uint8)
-
-    # ── 3. Unsharp mask ───────────────────────────────────────────────────
     blur      = cv2.GaussianBlur(img_boosted, (0, 0), sigmaX=2.5)
     img_sharp = cv2.addWeighted(img_boosted, 1.4, blur, -0.4, 0)
-
     return img_sharp
-
 
 
 i = 0
@@ -423,16 +427,13 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
         pixels_bgr, _ = get_pixels(tx, ty)
         if len(pixels_bgr) == 0:
             return "Unknown"
-
         avg = pixels_bgr.mean(axis=0)
         dom_h, dom_s, dom_v = float(avg[0]), float(avg[1]), float(avg[2])
-
         for name, (lo, hi) in RESOURCES_BGR.items():
             if (lo[0] <= dom_h <= hi[0] and
                     lo[1] <= dom_s <= hi[1] and
                     lo[2] <= dom_v <= hi[2]):
                 return f"{name[:2]}"
-
         return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
 
     tile_results = []
@@ -457,10 +458,6 @@ def classify_color(bgr_tuple, kind):
     return None, None
 
 def classify_sample(raw_bgr, kind):
-    """Saturation-gated classification: only treat a sample as a player piece
-    if the *raw* sample is genuinely saturated. _boost() amplifies muted tile
-    tones into confident-looking orange/red, so always classifying the boosted
-    color produces false positives on plain board pixels."""
     raw_hsv = cv2.cvtColor(np.array([[raw_bgr]], dtype=np.uint8),
                             cv2.COLOR_BGR2HSV)[0, 0]
     if raw_hsv[1] < 130:
@@ -483,12 +480,6 @@ def avg_bgr_region(img, mask):
     return tuple(int(v) for v in ((px * w[:,None]).sum(axis=0) / tw))
 
 def saturated_pixel_mean(img, mask, sat_min=150, min_frac=0.40):
-    """Mean BGR of only the saturated pixels inside `mask`. Returns None when
-    fewer than `min_frac` of the masked pixels are saturated above `sat_min`.
-    Lets us tell "this sample contains a player piece" from "this sample is
-    just tile background" — the latter has almost no saturated pixels even if
-    a few stray bright pixels would otherwise drag a weighted mean toward a
-    road-like color."""
     ys, xs = np.where(mask == 255)
     if len(xs) == 0: return None
     bgr_pixels = img[ys, xs]
@@ -597,11 +588,6 @@ def draw_vertices_edges(overlay, final_hex_crop, tile_results, R, H, W):
 
 # ── Robber detection ──────────────────────────────────────────────────────────
 def detect_robber(img, tile_results, R):
-    # Restrict search to tile interiors only. Roads sit on tile boundaries and
-    # settlements on vertices — both produce dark blobs the old detector would
-    # snap to the nearest tile and report as a robber. The interior mask
-    # (~0.5*R radius hex per tile) covers where a real robber actually sits
-    # and excludes shadows that leak in from edge pieces.
     H, W = img.shape[:2]
     interior_mask = np.zeros((H, W), dtype=np.uint8)
     for _, _, tx, ty, _ in tile_results:
@@ -612,16 +598,11 @@ def detect_robber(img, tile_results, R):
     raw = cv2.morphologyEx(cv2.inRange(img, ROBBER_LOWER, ROBBER_UPPER),
                            cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
     mask = cv2.bitwise_and(raw, raw, mask=interior_mask)
-
-    # Scale min-area with tile size so it adapts if the warp canvas changes.
-    # 0.05 * R^2 ≈ 280px for R≈75 — comfortably below real-robber blob sizes
-    # (350-400px on our fixtures) and above shadow/feature noise (≤290px).
     MIN_AREA = int(0.05 * R * R)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours: return None
     area_cap = 2.6 * R * R * ROBBER_MAX_AREA_FRAC
-    valid = [c for c in contours
-             if MIN_AREA <= cv2.contourArea(c) < area_cap]
+    valid = [c for c in contours if MIN_AREA <= cv2.contourArea(c) < area_cap]
     if not valid: return None
     M = cv2.moments(max(valid, key=cv2.contourArea))
     if M["m00"] == 0: return None
@@ -630,9 +611,6 @@ def detect_robber(img, tile_results, R):
     for _, _, tx, ty, _ in tile_results:
         d = np.hypot(rx-tx, ry-ty)
         if d < md: md = d; best = (tx, ty)
-    # The robber pawn sits near tile centre. Real fixtures show 3-10px offset;
-    # anything past 30% of R is almost certainly a shadow/feature being snapped
-    # to the wrong tile.
     if best is None or md > R * 0.3:
         return None
     return best, (rx, ry)
@@ -660,17 +638,12 @@ def place_numbers(overlay, tile_results, R):
         if number is None: continue
         label = str(number)
         col   = (0,0,220) if number in [6,8] else (20,20,20)
-        # cv2.circle(final_board, (tx,ty), int(R*0.28), (230,225,200), -1)
-        # cv2.circle(final_board, (tx,ty), int(R*0.28), (120,110,80),   1)
         scale = 0.55 if number >= 10 else 0.65
         (tw,th),_ = cv2.getTextSize(label, FONT, scale, 2)
         org = (tx-tw//2, ty+th//2)
-        # cv2.putText(final_board, label, org, FONT, scale, (0,0,0), 3, cv2.LINE_AA)
-        # cv2.putText(final_board, label, org, FONT, scale, col,     1, cv2.LINE_AA)
     return final_board
 
 # ── Port detection ────────────────────────────────────────────────────────────
-
 
 def get_normalisation_rotation(cx, cy, board_cx, board_cy):
     dx, dy = cx-board_cx, cy-board_cy
@@ -692,12 +665,10 @@ def rotate_crop(img, angle):
                           flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
 
-
 def make_portbg_only_mask(img_bgr):
     return cv2.morphologyEx(
         cv2.bitwise_not(cv2.inRange(img_bgr, PORT_COLOR_LOWER, PORT_COLOR_UPPER)),
         cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
-
 
 
 def predict_resource_from_avg(avg_bgr):
@@ -749,48 +720,76 @@ def match_port_template(crop, templates, threshold=0.35):
     if not scores: return "3to1", 0.0, {}
     best = max(scores, key=lambda n: scores[n]["combined"])
     return (f"2:1 {best}" if scores[best]["combined"] >= threshold else "3to1"), scores[best]["combined"], scores
+
 def sort_blobs_clockwise(blobs, board_cx, board_cy):
     """Sort blobs by angle clockwise from 12 o'clock."""
     def _angle(blob):
         cx, cy, _ = blob
         dx, dy = cx - board_cx, cy - board_cy
-        a = np.arctan2(dx, -dy)          # CW from top
+        a = np.arctan2(dx, -dy)
         return a if a >= 0 else a + 2 * np.pi
     return sorted(blobs, key=_angle)
+
+
+# ── Port blob saver ───────────────────────────────────────────────────────────
+_port_blob_frame_counter = 0
+
+def save_port_blobs(blobs_cw, save_dir=PORT_BLOB_SAVE_DIR):
+    """Save every detected port blob ROI to `save_dir` as a JPEG.
+
+    Files are named:
+        port_<frame6d>_<slot2d>_cx<X>_cy<Y>.jpg        ← raw crop
+        port_<frame6d>_<slot2d>_cx<X>_cy<Y>_clean.jpg  ← white/dark removed
+
+    The directory is created automatically on first call.
+    """
+    global _port_blob_frame_counter
+    os.makedirs(save_dir, exist_ok=True)
+    frame_id = _port_blob_frame_counter
+    _port_blob_frame_counter += 1
+
+    for slot, (cx, cy, roi) in enumerate(blobs_cw):
+        base = f"port_{frame_id:06d}_{slot:02d}_cx{cx}_cy{cy}"
+        cv2.imwrite(os.path.join(save_dir, f"{base}.jpg"), roi)
+        cv2.imwrite(os.path.join(save_dir, f"{base}_clean.jpg"),
+                    remove_white_and_dark(roi))
+
+    if blobs_cw:
+        print(f"[port_blobs] frame {frame_id}: saved {len(blobs_cw)} blob(s) → {save_dir}/")
+
 
 def detect_and_draw_ports(board_img, tile_results, R):
     """
     1. Find blobs outside the hex board.
-    2. Classify each as brick / wood / wheat (priority: brick < wood < wheat)
-       or unknown.
-    3. Sort all blobs clockwise from top.
-    4. Find the first detected 2:1 port (brick has highest priority).
-    5. Starting from that blob, fill clockwise with CLOCKWISE_PORT_LABELS.
+    2. Save every blob crop to PORT_BLOB_SAVE_DIR/  ← NEW
+    3. Classify each as brick / wood / wheat or unknown.
+    4. Sort all blobs clockwise from top.
+    5. Find the first detected 2:1 port and fill labels clockwise.
     6. Draw coloured circles + labels.
- 
+
     Returns (annotated_img, port_list)
-    where port_list = [{"cx", "cy", "label", "resource"}, ...]
     """
     H, W = board_img.shape[:2]
     board_cx, board_cy = W // 2, H // 2
- 
+
     blobs = detect_port_blobs(board_img, tile_results, R)
     if not blobs:
         return board_img, []
- 
+
     blobs_cw = sort_blobs_clockwise(blobs, board_cx, board_cy)
- 
+
+    # ── Save every blob to disk ───────────────────────────────────────────
+
     # ── Classify each blob by color ───────────────────────────────────────
-    detected = []          # (cx, cy, resource_or_None)
+    detected = []
     for cx, cy, roi in blobs_cw:
         crop_clean = remove_white_and_dark(roi)
         content_m = make_content_mask(crop_clean)
         avg = get_avg_content_color(crop_clean, content_m)
         resource = detect_resource_from_avg(avg) if avg else None
         detected.append((cx, cy, resource))
- 
-    # ── Find anchor: first blob matching priority order ───────────────────
-    # Priority: brick first, then wood, then wheat.
+
+    # ── Find anchor ───────────────────────────────────────────────────────
     anchor_idx = None
     for priority_res in ("brick", "wood", "wheat"):
         for i, (_, _, res) in enumerate(detected):
@@ -799,11 +798,11 @@ def detect_and_draw_ports(board_img, tile_results, R):
                 break
         if anchor_idx is not None:
             break
- 
+
     # ── Assign labels clockwise from anchor ───────────────────────────────
     n = len(detected)
     port_list = []
- 
+
     if anchor_idx is not None:
         for slot, (cx, cy, _) in enumerate(detected):
             blob_idx = (anchor_idx + slot) % n
@@ -815,10 +814,9 @@ def detect_and_draw_ports(board_img, tile_results, R):
                 "resource": label_key,
             })
     else:
-        # No recognisable 2:1 port — label everything 3:1
         for cx, cy, _ in detected:
             port_list.append({"cx": cx, "cy": cy, "label": "3:1", "resource": "3:1"})
- 
+
     # ── Draw ──────────────────────────────────────────────────────────────
     out = board_img.copy()
     for p in port_list:
@@ -832,7 +830,7 @@ def detect_and_draw_ports(board_img, tile_results, R):
         (tw, th), _ = cv2.getTextSize(label, FONT, scale, 1)
         cv2.putText(out, label, (cx - tw // 2, cy + th // 2), FONT, scale, (0, 0, 0), 2, cv2.LINE_AA)
         cv2.putText(out, label, (cx - tw // 2, cy + th // 2), FONT, scale, (255, 255, 255), 1, cv2.LINE_AA)
- 
+
     return out, port_list
 
 # ── Frame processor ───────────────────────────────────────────────────────────
@@ -845,13 +843,10 @@ def _error_frame(img, msg: str) -> bytes:
     cv2.putText(out, msg, (20, 50), FONT, 0.8, (0, 80, 255), 2, cv2.LINE_AA)
     return _encode(out)
 
-# FIX 1+2+7: return type updated to 3-tuple; all early-exit paths return {}
-#             as the third element so callers never see a 2-tuple.
 def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
     arr = np.frombuffer(jpg_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        # FIX 7: empty dict as third value
         return _error_frame(None, "Failed to decode frame"), "decode_error", {}
 
     l, a, b  = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2LAB))
@@ -871,17 +866,10 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
         (tw, th), _ = cv2.getTextSize(msg, FONT, 1.2, 2)
         cv2.rectangle(out, (16, 16), (36 + tw, 36 + th), (0, 0, 0), -1)
         cv2.putText(out, msg, (24, 24 + th), FONT, 1.2, (0, 80, 255), 2, cv2.LINE_AA)
-        # FIX 7: empty dict as third value
         return _encode(out), "no_board", {}
 
     try:
         center      = np.mean(hex_points, axis=0)[0]
-        # Sort corners clockwise from "top" instead of by raw atan2. atan2's
-        # discontinuity is at the horizontal-left direction, which is right
-        # where a flat-top hex has its LEFT corner — tiny camera tilt flips
-        # that corner between first and last in sort order, rotating the
-        # entire warp by 60° across frames. Measuring CW from straight up
-        # puts the discontinuity at the (cornerless) top centreline instead.
         def _cw_from_top(p):
             dx, dy = p[0][0] - center[0], p[0][1] - center[1]
             ang = np.arctan2(dx, -dy)
@@ -889,8 +877,6 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
         sorted_hex = sorted(hex_points, key=_cw_from_top)
         src_pts     = np.array(sorted_hex).reshape(6, 2).astype(np.float32)
         size        = 440
-        # dst angles matched to the CW-from-top order: src[0] is TOP-RIGHT,
-        # which corresponds to dst angle 300° in image coords (math y flipped).
         dst_pts     = np.array([[size + size*np.cos(np.radians(a)),
                                   size + size*np.sin(np.radians(a))]
                                  for a in [300, 0, 60, 120, 180, 240]],
@@ -925,14 +911,10 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
             cv2.putText(overlay, "ROBBER", (tx-tw//2, ty+th//2),
                         FONT, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
 
-        final_board2       = place_numbers(overlay, tile_results, R)
-        blobs              = detect_port_blobs(final_hex_crop, tile_results, R)
-        # FIX 4: unpack both return values from draw_ports
-        # delete:  blobs = detect_port_blobs(final_hex_crop, tile_results, R)
+        final_board2         = place_numbers(overlay, tile_results, R)
+        # detect_and_draw_ports now also calls save_port_blobs() internally
         result, port_results = detect_and_draw_ports(final_board2.copy(), tile_results, R)
-        # ── Build board state payload ─────────────────────────────────────
-        # FIX 1+2: this block is now correctly indented inside the try,
-        #           and the return below replaces the old single-value return.
+
         spiral_lookup = {pos: i for i, pos in enumerate(CATAN_SPIRAL_POSITIONS)}
 
         board_tiles   = []
@@ -958,7 +940,6 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 "number":      number,
             })
 
-        # Robber tile index
         robber_idx = None
         if robber_data:
             (rtx, rty), _ = robber_data
@@ -968,18 +949,11 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 None
             )
 
-        # Vertex and edge color samples. Adjacent hexes share vertices/edges,
-        # so dedupe by rounded position — otherwise each shared edge appears
-        # twice and each shared vertex up to three times.
         DEDUP_TOL = 8
         vertex_list, edge_list = [], []
         vertex_seen, edge_seen = {}, {}
 
         def _find_vertex_nearby(vx_int, vy_int):
-            """Return existing vertex_id matching this position, checking the
-            ±1 snap-cell neighbourhood. Shared corners on adjacent hexes can
-            land on different sides of a snap boundary by 1px due to int()
-            truncation, so we look slightly wider than the base key."""
             base_kx = round(vx_int / DEDUP_TOL)
             base_ky = round(vy_int / DEDUP_TOL)
             for dkx in (0, -1, 1):
@@ -988,6 +962,7 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                     if k in vertex_seen:
                         return k, vertex_seen[k]
             return (base_kx, base_ky), None
+
         for _, _, tx, ty, _ in tile_results:
             hex_idx = next(
                 (bt["spiralIndex"] for bt in board_tiles
@@ -1021,8 +996,6 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
                 vx1, vy1 = tx + R * np.cos(a1), ty + R * np.sin(a1)
                 mx, my   = int((vx0 + vx1) / 2),   int((vy0 + vy1) / 2)
                 ea       = float(np.degrees(np.arctan2(vy1 - vy0, vx1 - vx0)))
-                # Look up the two endpoint vertex IDs (with ±1 cell tolerance,
-                # same as the vertex loop) so connected edges share IDs.
                 _, vertex_a_id = _find_vertex_nearby(int(vx0), int(vy0))
                 _, vertex_b_id = _find_vertex_nearby(int(vx1), int(vy1))
                 if vertex_a_id is None: vertex_a_id = -1
@@ -1054,12 +1027,10 @@ def process_frame(jpg_bytes: bytes) -> tuple[bytes, str, dict]:
             edge_colors       = edge_list,
         )
 
-        # FIX 1+2: return 3-tuple with state dict; replaces old 2-tuple return
         return _encode(result), "ok", asdict(state)
 
     except Exception as e:
         print(f"[CV] Pipeline error: {e}")
-        # FIX 7: empty dict as third value
         return _error_frame(img, f"Error: {str(e)[:80]}"), "error", {}
 
 def test_image(image_path: str, output_path: str = "test_output.jpg"):
@@ -1073,15 +1044,15 @@ def test_image(image_path: str, output_path: str = "test_output.jpg"):
 
     print(f"Status: {status}")
     print(f"Output saved to: {output_path}")
+    print(f"Port blobs saved to: {PORT_BLOB_SAVE_DIR}/")
 
     if status != "ok":
         return
 
-    # ── Export cropped port blobs + avg color diagnostics ─────────────────
+    # ── Print blob diagnostics (blobs already saved by process_frame) ─────
     arr = np.frombuffer(jpg_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
-    # Re-run just enough pipeline to get final_hex_crop and tile_results
     l, a, b  = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2LAB))
     orig_eq  = cv2.cvtColor(
         cv2.merge([cv2.createCLAHE(clipLimit=2.4, tileGridSize=(8,8)).apply(l), a, b]),
@@ -1119,7 +1090,6 @@ def test_image(image_path: str, output_path: str = "test_output.jpg"):
     board_cx, board_cy = W // 2, H // 2
     blobs_cw = sort_blobs_clockwise(blobs, board_cx, board_cy)
 
-    base = os.path.splitext(output_path)[0]
     print(f"\n{'─'*55}")
     print(f"{'Blob':<6} {'CX':>5} {'CY':>5}  {'B':>5} {'G':>5} {'R':>5}  {'Detected':<10}")
     print(f"{'─'*55}")
@@ -1133,23 +1103,13 @@ def test_image(image_path: str, output_path: str = "test_output.jpg"):
             print(f"{idx:<6} {cx:>5} {cy:>5}  {b_v:>5} {g_v:>5} {r_v:>5}  {detected or '—':<10}")
         else:
             print(f"{idx:<6} {cx:>5} {cy:>5}  {'no content':>17}  {'—':<10}")
-
-        # Save the raw crop
-        crop_path = f"{base}_port_{idx:02d}_cx{cx}_cy{cy}.jpg"
-        cv2.imwrite(crop_path, roi)
-        # Save the cleaned crop
-        clean_path = f"{base}_port_{idx:02d}_clean.jpg"
-        cv2.imwrite(clean_path, crop_clean)
-
     print(f"{'─'*55}")
-    print(f"Saved {len(blobs_cw)} port crop(s) alongside {output_path}")
 
 # ── Valid board state filter ──────────────────────────────────────────────────
 VALID_RESOURCE_COUNTS = {"Forest": 4, "Pasture": 4, "Field": 4, "Hills": 3, "Mountain": 3, "Desert": 1}
 
 
 def is_valid_board_state(state: dict) -> bool:
-    """Return True only when the 19 detected tiles match the standard Catan distribution."""
     tiles = state.get("tile_results", [])
     if len(tiles) != 19:
         return False
@@ -1158,10 +1118,6 @@ def is_valid_board_state(state: dict) -> bool:
 
 
 def compute_majority_state(buffer: list) -> dict:
-    """Elect the most common complete board layout from a buffer of pre-validated states.
-    All frames in the buffer have already passed is_valid_board_state."""
-
-    # Elect the most common complete board layout
     config_votes: Counter = Counter()
     config_state: dict = {}
     for state in buffer:
@@ -1173,7 +1129,6 @@ def compute_majority_state(buffer: list) -> dict:
     best_key = config_votes.most_common(1)[0][0]
     best_tiles = config_state[best_key].get("tile_results", [])
 
-    # Majority-vote dynamic fields across all frames in the buffer
     robber_votes: Counter = Counter(
         s.get("robber_tile_index")
         for s in buffer
@@ -1238,9 +1193,7 @@ def compute_majority_state(buffer: list) -> dict:
 
 
 # ── WebSocket server ──────────────────────────────────────────────────────────
-# FIX 5: duplicate/broken handler removed; single clean handler below
 async def cv_handler(websocket):
-    # All successfully-processed frames enter this buffer (validation skipped for testing).
     valid_buffer: deque = deque(maxlen=FRAME_BUFFER_SIZE)
     print(f"[CV] Client connected: {websocket.remote_address}")
     try:
@@ -1248,7 +1201,6 @@ async def cv_handler(websocket):
             if isinstance(message, bytes):
                 processed, status, state = process_frame(message)
                 await websocket.send(processed)
-                # Always send JSON second message so client toggle stays in sync
                 if status == "ok":
                     valid_buffer.append(state)
                     n = len(valid_buffer)
