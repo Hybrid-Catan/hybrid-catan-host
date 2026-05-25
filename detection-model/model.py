@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, asdict
 from typing import Optional
 from collections import deque, Counter
-
+import tensorflow as tf
 @dataclass
 class BoardState:
     tile_results: list       # [{row, col, cx, cy, resource, number}]
@@ -26,12 +26,12 @@ PORT_COLOR_UPPER = np.array([235, 244, 250], dtype=np.uint8)
 PORT_NAMES_2to1 = ["brick", "ore", "sheep", "wheat", "wood"]
 
 RESOURCES_BGR = {
-    "Hills":    (np.array([20,  50, 115]), np.array([ 70,  90, 150])),
+    "Hills":    (np.array([20,  50, 110]), np.array([ 70,  90, 150])),
     "Forest":   (np.array([30,  65,  30]), np.array([ 80,  95,  80])),
-    "Pasture":  (np.array([35, 130, 120]), np.array([ 90, 185, 165])),
+    "Pasture":  (np.array([70, 130, 120]), np.array([ 90, 185, 165])),
     "Mountain": (np.array([60,  70,  85]), np.array([ 95, 110, 115])),
     "Desert":   (np.array([75, 150, 170]), np.array([125, 180, 240])),
-    "Field":    (np.array([30,  90, 120]), np.array([ 75, 145, 205])),
+    "Field":    (np.array([30,  90, 120]), np.array([ 70, 145, 205])),
 }
 
 # HSV ranges for tile classification (OpenCV convention: H 0-180, S 0-255, V 0-255).
@@ -84,7 +84,7 @@ ROBBER_MAX_AREA_FRAC = 0.30
 DESERT_BGR           = np.array([156, 208, 225], dtype=np.float32)
 DESERT_THRESHOLD     = 40
 FONT                 = cv2.FONT_HERSHEY_SIMPLEX
-SLOW_FRAME_BUFFER_SIZE    = 1
+SLOW_FRAME_BUFFER_SIZE    = 50000
 FAST_FRAME_BUFFER_SIZE    = 2
 
 SAT_BOOST, VAL_BOOST = 1.8, 1.5
@@ -278,23 +278,7 @@ def _boost(bgr):
     out = np.array([[[h, min(255., s * SAT_BOOST), min(255., v * VAL_BOOST)]]], dtype=np.uint8)
     return tuple(int(x) for x in cv2.cvtColor(out, cv2.COLOR_HSV2BGR)[0, 0])
 
-def tf_classify_tile(avg_bgr_np):
-    px      = np.clip(avg_bgr_np, 0, 255).astype(np.uint8).reshape(1, 1, 3)
-    avg_hsv = cv2.cvtColor(px, cv2.COLOR_BGR2HSV)[0, 0].astype(np.float32)
-    for name, (lo, hi) in RESOURCES_HSV.items():
-        if np.all(avg_hsv >= lo) and np.all(avg_hsv <= hi):
-            print(f"[HSV] H={avg_hsv[0]:.0f} S={avg_hsv[1]:.0f} V={avg_hsv[2]:.0f} → {name}")
-            return name
-    # Nearest-neighbour fallback: pick closest resource by midpoint distance
-    best_name, best_dist = "Desert", float('inf')
-    for name, (lo, hi) in RESOURCES_HSV.items():
-        mid  = (lo.astype(np.float32) + hi.astype(np.float32)) / 2
-        dist = float(np.linalg.norm(avg_hsv - mid))
-        if dist < best_dist:
-            best_dist = dist
-            best_name = name
-    print(f"[HSV] H={avg_hsv[0]:.0f} S={avg_hsv[1]:.0f} V={avg_hsv[2]:.0f} → {best_name} (nearest-neighbour)")
-    return best_name
+
 
 def tf_hist_correlation(crop_hsv, tmpl_hsv, crop_mask, tmpl_mask):
     h_bins, s_bins = 50, 60
@@ -450,6 +434,15 @@ def enhance_tile_contrast(img_bgr: np.ndarray) -> np.ndarray:
     img_sharp = cv2.addWeighted(img_boosted, 1.4, blur, -0.4, 0)
     return img_sharp
 
+# ── TensorFlow utilities ──────────────────────────────────────────────────────
+def tf_classify_tile(avg_bgr_np):
+    avg_tf = tf.constant(avg_bgr_np, dtype=tf.float32)
+    for name, (lo, hi) in RESOURCES_BGR.items():
+        if tf.reduce_all((avg_tf >= tf.constant(lo, dtype=tf.float32)) &
+                         (avg_tf <= tf.constant(hi, dtype=tf.float32))):
+            return name
+    return "Desert"
+
 def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
     num_rows    = len(tile_layout)
     col_spacing = R * np.sqrt(3)
@@ -464,15 +457,14 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
         pixels_bgr, _ = get_pixels(tx, ty)
         if len(pixels_bgr) == 0:
             return "Unknown"
-        avg_bgr = pixels_bgr.mean(axis=0).astype(np.uint8)
-        px      = avg_bgr.reshape(1, 1, 3)
-        h, s, v = cv2.cvtColor(px, cv2.COLOR_BGR2HSV)[0, 0].astype(float)
-        for name, (lo, hi) in RESOURCES_HSV.items():
-            if (lo[0] <= h <= hi[0] and
-                    lo[1] <= s <= hi[1] and
-                    lo[2] <= v <= hi[2]):
-                return name
-        return f"H{h:.0f} S{s:.0f} V{v:.0f}"
+        avg = pixels_bgr.mean(axis=0)
+        dom_h, dom_s, dom_v = float(avg[0]), float(avg[1]), float(avg[2])
+        for name, (lo, hi) in RESOURCES_BGR.items():
+            if (lo[0] <= dom_h <= hi[0] and
+                    lo[1] <= dom_s <= hi[1] and
+                    lo[2] <= dom_v <= hi[2]):
+                  return name
+        return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
 
     tile_results = []
     for row_idx, num_tiles in enumerate(tile_layout):
