@@ -37,13 +37,13 @@ const worldPos = coords.map(([q, r]) => hexToWorld(q, r));
 
 // ── Tile config (render/src/main.js TILE_CONFIG) ──────────────────────────────
 const TILE_CONFIG = {
-  ore:    { url: '/ore.gltf',          color: 0x7A8A8A, offset: { x: 0,     y: 0,  z: 0     }, scale: 1.15,    rotation: 0           },
-  sheep:  { url: '/sheep.gltf',        color: 0x78C850, offset: { x: 0,  y: 0,   z: 0  }, scale: 1.15, rotation: Math.PI / 6 },
-  wheat:  { url: '/wheat.gltf',        color: 0xDAA520, offset: { x: 0, y: 0,  z: 0 }, scale: 1.15, rotation: Math.PI / 6 },
-  desert: { url: '/desert.gltf',       color: 0xD2B48C, offset: { x: 0,     y: 0,  z: 0  }, scale: 1.15,  rotation: 0           },
-  wood:   { url: '/wood.gltf',         color: 0x2D6A2D, offset: { x: 0,     y: 0, z: 0 }, scale: 1.15,  rotation: 0           },
-  brick:  { url: '/brick.gltf',        color: 0xA0522D, offset: { x: 0,  y: 0, z: 0 }, scale: 1.15, rotation: Math.PI / 6 },
-} as const;
+  ore:    { url: '/ore.gltf',    color: 0x7A8A8A, offset: { x: 0, y: 0, z: 0 }, scale: 1.15, rotation: 0,           tokenOffset: { x: 0, y: 0.1, z: 0.5 } },
+  sheep:  { url: '/sheep.gltf',  color: 0x78C850, offset: { x: 0, y: 0, z: 0 }, scale: 1.15, rotation: Math.PI / 6, tokenOffset: { x: 0.1, y: 0.1, z: 0.3 } },
+  wheat:  { url: '/wheat.gltf',  color: 0xDAA520, offset: { x: 0, y: 0, z: 0 }, scale: 1.15, rotation: Math.PI / 6, tokenOffset: { x: -0.42, y: 0.1, z: 0.22 } },
+  desert: { url: '/desert.gltf', color: 0xD2B48C, offset: { x: 0, y: 0, z: 0 }, scale: 1.15, rotation: 0,           tokenOffset: { x: 0, y: 0.1, z: 0 } },
+  wood:   { url: '/wood.gltf',   color: 0x2D6A2D, offset: { x: 0, y: 0, z: 0 }, scale: 1.15, rotation: 0,           tokenOffset: { x: 0.2, y: 0.1, z: 0.2 } },
+  brick:  { url: '/brick.gltf',  color: 0xA0522D, offset: { x: 0, y: 0, z: 0 }, scale: 1.15, rotation: Math.PI / 6, tokenOffset: { x: 0, y: 0.1, z: -0.5 } },
+};
 
 type TileType = keyof typeof TILE_CONFIG;
 
@@ -64,6 +64,12 @@ const DEFAULT_TILES: TileType[] = [
   'wheat', 'desert', 'ore', 'sheep', 'brick',
   'wood', 'wheat', 'sheep', 'ore',
   'wood', 'brick', 'wheat',
+];
+
+// Number token for each worldPos (null = desert, no token). Derived from
+// CATAN_SPIRAL_NUMBERS assigned in spiral order over CATAN_SPIRAL_POSITIONS.
+const DEFAULT_NUMBERS: (number | null)[] = [
+  8, 4, 11, 10, 11, 3, 12, 5, 9, null, 6, 9, 2, 4, 5, 10, 6, 3, 8,
 ];
 
 // ── Harbour positions (render/src/main.js) ────────────────────────────────────
@@ -115,9 +121,11 @@ type Props = {
   robberWorldIndex?: number | null;
   /** CV-detected harbour positions. Entries here replace the matching type in the default HARBOURS layout. */
   harbourOverrides?: HarbourInfo[];
+  /** Number token for each worldPos (19 entries). null = no token (desert). Defaults to standard spiral layout. */
+  tileNumbers?: (number | null)[];
 };
 
-export default function CatanBoard3D({ className, tileTypes, settlements, roads, robberWorldIndex, harbourOverrides }: Props) {
+export default function CatanBoard3D({ className, tileTypes, settlements, roads, robberWorldIndex, harbourOverrides, tileNumbers }: Props) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const updatePiecesRef = useRef<((s: SettlementInfo[], r: RoadInfo[], rob: number | null | undefined) => void) | null>(null);
   const requestRenderRef = useRef<(() => void) | null>(null);
@@ -148,10 +156,9 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
 
       const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'low-power' });
       renderer.setSize(W, H);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 0.75));
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping      = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.0;
+      renderer.toneMapping      = THREE.NoToneMapping;
       container.appendChild(renderer.domElement);
 
       let needsRender = true;
@@ -318,6 +325,39 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
         });
       });
 
+      // ── Number tokens ────────────────────────────────────────────────────────
+      const numbers  = tileNumbers ?? DEFAULT_NUMBERS;
+      const tokenGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.08, 16);
+      const sideMat  = new THREE.MeshBasicMaterial({ color: 0xc4a030 });
+      // Cache top-face textures by number value — at most 10 unique digits.
+      const texCache = new Map<number, any>();
+      function getTopMat(num: number) {
+        if (texCache.has(num)) return texCache.get(num)!;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 128;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = '#f5e2a0';
+        ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#7a5c1e'; ctx.lineWidth = 5; ctx.stroke();
+        ctx.fillStyle = (num === 6 || num === 8) ? '#cc1111' : '#1a1005';
+        ctx.font = 'bold 62px sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(num), 64, 64);
+        const mat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas) });
+        texCache.set(num, mat);
+        return mat;
+      }
+      worldPos.forEach(({ x, z }, i) => {
+        const num = numbers[i];
+        if (num == null) return;
+        const tileType    = layout[i] ?? 'ore';
+        const tokenOffset = TILE_CONFIG[tileType].tokenOffset;
+        // CylinderGeometry groups: 0=side, 1=top cap, 2=bottom cap
+        const token = new THREE.Mesh(tokenGeo, [sideMat, getTopMat(num), sideMat]);
+        token.position.set(x + tokenOffset.x, tokenOffset.y, z + tokenOffset.z);
+        scene.add(token);
+      });
+
       // ── Harbours ─────────────────────────────────────────────────────────────
       // If CV detected the brick harbour at a different position than the default,
       // the whole board is rotated. Find how many 60° CCW steps map the default
@@ -403,7 +443,10 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
           newRobberWorldIndex >= 0 &&
           newRobberWorldIndex < worldPos.length
         ) {
-          const rPos = worldPos[newRobberWorldIndex];
+          const rPos      = worldPos[newRobberWorldIndex];
+          const tileType  = layout[newRobberWorldIndex] ?? 'ore';
+          const tOff      = TILE_CONFIG[tileType].tokenOffset;
+          const TOKEN_TOP = tOff.y + 0.04; // tokenOffset.y is centre; +half-height to reach top face
           const mat  = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4, metalness: 0.2 });
           const base = new THREE.Mesh(sharedGeo.robberBase, mat);
           const head = new THREE.Mesh(sharedGeo.robberHead, mat);
@@ -411,7 +454,7 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads,
           head.position.y = 0.28;
           const g = new THREE.Group();
           g.add(base, head);
-          g.position.set(rPos.x, 0, rPos.z);
+          g.position.set(rPos.x + tOff.x, TOKEN_TOP, rPos.z + tOff.z);
           piecesGroup.add(g);
         }
 
