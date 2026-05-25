@@ -160,7 +160,6 @@ def make_content_mask(img_bgr, dark_thresh=50, bright_thresh=220, sat_thresh=60)
     excl = cv2.bitwise_or(excl, (s < sat_thresh).astype(np.uint8) * 255)
     return cv2.morphologyEx(cv2.bitwise_not(excl), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
-
 def get_avg_content_color(img_bgr, mask):
     pixels = img_bgr[mask == 255]
     if pixels.size == 0:
@@ -234,6 +233,9 @@ def detect_port_blobs(board_img, tile_results, R):
         cv2.drawContours(bf, [cnt], -1, 255, -1)
         roi = board_img[y:y + h, x:x + w].copy()
         roi[bf[y:y + h, x:x + w] == 0] = (255, 255, 255)
+        # Also white-out the sandy port background so it doesn't pollute colour averaging
+        port_bg_mask = cv2.inRange(roi, PORT_COLOR_LOWER, PORT_COLOR_UPPER)
+        roi[port_bg_mask == 255] = (255, 255, 255)
         blobs.append((cx, cy, roi))
     return blobs
 
