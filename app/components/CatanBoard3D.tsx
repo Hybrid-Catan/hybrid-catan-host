@@ -106,12 +106,14 @@ type Props = {
   tileTypes?: TileType[];
   settlements?: SettlementInfo[];
   roads?: RoadInfo[];
+  /** worldPos index of the tile the robber is on (0–18). null/undefined hides it. */
+  robberWorldIndex?: number | null;
   harbourScale?: number;
 };
 
-export default function CatanBoard3D({ className, tileTypes, settlements, roads }: Props) {
+export default function CatanBoard3D({ className, tileTypes, settlements, roads, robberWorldIndex }: Props) {
   const containerRef   = useRef<HTMLDivElement>(null);
-  const updatePiecesRef = useRef<((s: SettlementInfo[], r: RoadInfo[]) => void) | null>(null);
+  const updatePiecesRef = useRef<((s: SettlementInfo[], r: RoadInfo[], rob: number | null | undefined) => void) | null>(null);
   const requestRenderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -212,7 +214,21 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
           gltfLoader.load(url, (gltf: any) => {
             if (disposed) return;
             const model = gltf.scene;
-            if (color !== null) model.traverse((c: any) => { if (c.isMesh) c.material.color.set(color); });
+            if (color !== null) {
+              // GLTF tiles ship with PBR baseColorFactor ≈ [0.85,0.85,0.85] (grey).
+              // Setting material.color alone gets crushed by the factor + tone
+              // mapping. Swap in a fresh MeshStandardMaterial so the resource
+              // colour reads cleanly.
+              model.traverse((c: any) => {
+                if (c.isMesh) {
+                  c.material = new THREE.MeshStandardMaterial({
+                    color,
+                    roughness: 0.7,
+                    metalness: 0.05,
+                  });
+                }
+              });
+            }
             model.updateMatrixWorld(true);
             const box = new THREE.Box3().setFromObject(model);
             const sz  = new THREE.Vector3(); box.getSize(sz);
@@ -288,7 +304,11 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
       const piecesGroup = new THREE.Group();
       scene.add(piecesGroup);
 
-      function updatePieces(newSettlements: SettlementInfo[], newRoads: RoadInfo[]) {
+      function updatePieces(
+        newSettlements: SettlementInfo[],
+        newRoads: RoadInfo[],
+        newRobberWorldIndex: number | null | undefined,
+      ) {
         while (piecesGroup.children.length > 0) piecesGroup.remove(piecesGroup.children[0]);
 
         for (const { q: sQ, r: sR, v, color } of newSettlements) {
@@ -316,11 +336,29 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
           mesh.rotation.y = pos.rotation;
           piecesGroup.add(mesh);
         }
+
+        if (
+          typeof newRobberWorldIndex === 'number' &&
+          newRobberWorldIndex >= 0 &&
+          newRobberWorldIndex < worldPos.length
+        ) {
+          const rPos = worldPos[newRobberWorldIndex];
+          const mat  = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4, metalness: 0.2 });
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.15, 16), mat);
+          const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), mat);
+          base.position.y = 0.075;
+          head.position.y = 0.28;
+          const g = new THREE.Group();
+          g.add(base, head);
+          g.position.set(rPos.x, 0, rPos.z);
+          piecesGroup.add(g);
+        }
+
         requestRender();
       }
 
       updatePiecesRef.current = updatePieces;
-      updatePieces(settlements ?? [], roads ?? []);
+      updatePieces(settlements ?? [], roads ?? [], robberWorldIndex);
 
       // ── Resize observer ───────────────────────────────────────────────────────
       const ro = new ResizeObserver(() => {
@@ -370,8 +408,8 @@ export default function CatanBoard3D({ className, tileTypes, settlements, roads 
   }, [tileTypes]);
 
   useEffect(() => {
-    updatePiecesRef.current?.(settlements ?? [], roads ?? []);
-  }, [settlements, roads]);
+    updatePiecesRef.current?.(settlements ?? [], roads ?? [], robberWorldIndex);
+  }, [settlements, roads, robberWorldIndex]);
 
   return <div ref={containerRef} className={className} style={{ width: '100%', height: '100%' }} />;
 }

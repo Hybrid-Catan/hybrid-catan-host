@@ -36,7 +36,7 @@ PORT_COLORS = {
 }
 
 RESOURCES_BGR = {
-    "Hill": (np.array([20, 50, 115]), np.array([70, 90, 150])),
+    "Hills": (np.array([20, 50, 115]), np.array([70, 90, 150])),
     "Forest": (np.array([30, 65, 30]), np.array([80, 95, 80])),
     "Pasture": (np.array([35, 130, 120]), np.array([90, 185, 165])),
     "Mountain": (np.array([60, 70, 85]), np.array([95, 110, 115])),
@@ -435,7 +435,7 @@ def classify_all_tiles(final_hex_crop, H, W, R, cx0, cy0, tile_layout):
             if (lo[0] <= dom_h <= hi[0] and
                     lo[1] <= dom_s <= hi[1] and
                     lo[2] <= dom_v <= hi[2]):
-                return f"{name[:2]}"
+                return name
         return f"{dom_h:.0f} {dom_s:.0f} {dom_v:.0f}"
 
     tile_results = []
